@@ -116,7 +116,13 @@ impl Database {
                     id TEXT PRIMARY KEY,
                     name TEXT NOT NULL,
                     group_name TEXT NOT NULL,
+                    payment_plan TEXT NOT NULL DEFAULT 'one-time',
+                    plan_amount INTEGER NOT NULL DEFAULT 6000,
+                    installment_count INTEGER DEFAULT NULL,
                     paid_amount INTEGER NOT NULL DEFAULT 0,
+                    enrollment_date TEXT NOT NULL,
+                    next_due_date TEXT DEFAULT NULL,
+                    payment_status TEXT NOT NULL DEFAULT 'pending',
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 )".to_string(),
@@ -175,6 +181,21 @@ impl Database {
             },
             Migration {
                 version: 6,
+                description: "Create payment_transactions table".to_string(),
+                sql: "CREATE TABLE payment_transactions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    student_id TEXT NOT NULL,
+                    amount INTEGER NOT NULL,
+                    payment_date TEXT NOT NULL,
+                    payment_method TEXT DEFAULT 'cash',
+                    notes TEXT DEFAULT NULL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE CASCADE
+                )".to_string(),
+                applied_at: None,
+            },
+            Migration {
+                version: 7,
                 description: "Insert default settings".to_string(),
                 sql: "INSERT OR IGNORE INTO settings (key, value) VALUES 
                     ('payment_threshold', '6000'),
@@ -184,7 +205,12 @@ impl Database {
                     ('theme', 'light'),
                     ('enable_multi_user', 'false'),
                     ('backup_encryption', 'false'),
-                    ('accessibility_mode', 'false')".to_string(),
+                    ('accessibility_mode', 'false'),
+                    ('one_time_amount', '6000'),
+                    ('monthly_amount', '850'),
+                    ('installment_amount', '2850'),
+                    ('installment_interval', '3'),
+                    ('reminder_days', '7')".to_string(),
                 applied_at: None,
             },
         ]
@@ -224,6 +250,10 @@ impl Database {
             "CREATE INDEX IF NOT EXISTS idx_students_group_paid ON students(group_name, paid_amount)",  // Combined filtering
             "CREATE INDEX IF NOT EXISTS idx_students_created_at ON students(created_at)",  // Date-based queries
             "CREATE INDEX IF NOT EXISTS idx_students_updated_at ON students(updated_at)",  // Recently modified queries
+            "CREATE INDEX IF NOT EXISTS idx_students_payment_plan ON students(payment_plan)",  // Payment plan filtering
+            "CREATE INDEX IF NOT EXISTS idx_students_payment_status ON students(payment_status)",  // Payment status filtering
+            "CREATE INDEX IF NOT EXISTS idx_students_next_due_date ON students(next_due_date)",  // Due date queries
+            "CREATE INDEX IF NOT EXISTS idx_students_enrollment_date ON students(enrollment_date)",  // Enrollment tracking
             
             // Attendance table indexes - optimized for attendance tracking
             "CREATE INDEX IF NOT EXISTS idx_attendance_student_id ON attendance(student_id)",  // Student lookup
@@ -231,6 +261,14 @@ impl Database {
             "CREATE INDEX IF NOT EXISTS idx_attendance_student_date ON attendance(student_id, date)",  // Duplicate prevention
             "CREATE INDEX IF NOT EXISTS idx_attendance_date_desc ON attendance(date DESC)",  // Recent attendance first
             "CREATE INDEX IF NOT EXISTS idx_attendance_created_at ON attendance(created_at)",  // Chronological queries
+            
+            // Payment transactions table indexes - optimized for payment tracking
+            "CREATE INDEX IF NOT EXISTS idx_payment_transactions_student_id ON payment_transactions(student_id)",  // Student payment history
+            "CREATE INDEX IF NOT EXISTS idx_payment_transactions_payment_date ON payment_transactions(payment_date)",  // Date-based queries
+            "CREATE INDEX IF NOT EXISTS idx_payment_transactions_student_date ON payment_transactions(student_id, payment_date DESC)",  // Recent payments first
+            "CREATE INDEX IF NOT EXISTS idx_payment_transactions_amount ON payment_transactions(amount)",  // Amount-based queries
+            "CREATE INDEX IF NOT EXISTS idx_payment_transactions_method ON payment_transactions(payment_method)",  // Payment method filtering
+            "CREATE INDEX IF NOT EXISTS idx_payment_transactions_created_at ON payment_transactions(created_at)",  // Transaction chronology
             
             // Audit log indexes - optimized for change tracking and reporting
             "CREATE INDEX IF NOT EXISTS idx_audit_log_table_record ON audit_log(table_name, record_id)",  // Record history
@@ -279,6 +317,7 @@ impl Database {
         let tables = vec![
             "students",
             "attendance", 
+            "payment_transactions",
             "audit_log",
             "settings",
             "users",
@@ -783,8 +822,8 @@ mod tests {
         let (db, _temp_dir) = create_test_db();
         let history = db.get_migration_history().unwrap();
         
-        // Should have all 6 migrations applied
-        assert_eq!(history.len(), 6);
+        // Should have all 7 migrations applied
+        assert_eq!(history.len(), 7);
         
         // Check that versions are sequential
         for (i, migration) in history.iter().enumerate() {
@@ -808,8 +847,8 @@ mod tests {
         
         assert!(validation.is_valid);
         assert_eq!(validation.issues.len(), 0);
-        assert_eq!(validation.applied_count, 6);
-        assert_eq!(validation.total_count, 6);
+        assert_eq!(validation.applied_count, 7);
+        assert_eq!(validation.total_count, 7);
     }
     
     #[test]
@@ -817,8 +856,8 @@ mod tests {
         let (db, _temp_dir) = create_test_db();
         let schema_info = db.get_schema_info().unwrap();
         
-        assert_eq!(schema_info.current_version, 6);
-        assert_eq!(schema_info.latest_version, 6);
+        assert_eq!(schema_info.current_version, 7);
+        assert_eq!(schema_info.latest_version, 7);
         assert_eq!(schema_info.pending_migrations, 0);
         assert!(schema_info.is_up_to_date);
     }
@@ -828,7 +867,7 @@ mod tests {
         let (db, _temp_dir) = create_test_db();
         let all_migrations = db.get_migrations();
         
-        assert_eq!(all_migrations.len(), 6);
+        assert_eq!(all_migrations.len(), 7);
         
         // Check that versions are sequential starting from 1
         for (i, migration) in all_migrations.iter().enumerate() {
@@ -844,17 +883,17 @@ mod tests {
         
         // Test valid rollback info
         let rollback_info = db.get_rollback_info(3).unwrap();
-        assert_eq!(rollback_info.current_version, 6);
+        assert_eq!(rollback_info.current_version, 7);
         assert_eq!(rollback_info.target_version, 3);
-        assert_eq!(rollback_info.migrations_to_rollback, vec![4, 5, 6]);
+        assert_eq!(rollback_info.migrations_to_rollback, vec![4, 5, 6, 7]);
         assert!(rollback_info.warning.contains("SQLite does not support"));
         assert!(!rollback_info.instructions.is_empty());
         
         // Test invalid rollback (target >= current)
-        let result = db.get_rollback_info(6);
+        let result = db.get_rollback_info(7);
         assert!(result.is_err());
         
-        let result = db.get_rollback_info(7);
+        let result = db.get_rollback_info(8);
         assert!(result.is_err());
     }
     
@@ -863,8 +902,8 @@ mod tests {
         let (db, _temp_dir) = create_test_db();
         let version = db.get_current_version().unwrap();
         
-        // Should be at the latest version (6)
-        assert_eq!(version, 6);
+        // Should be at the latest version (7)
+        assert_eq!(version, 7);
     }
     
     #[test]

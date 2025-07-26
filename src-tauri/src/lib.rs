@@ -4,7 +4,7 @@ mod student_service;
 mod database_integration_test;
 
 use database::{Database, AppliedMigration, MigrationValidation, SchemaInfo, Migration, RollbackInfo};
-use student_service::{StudentService, Student, StudentWithAttendance, CreateStudentRequest, UpdateStudentRequest, StudentStatistics};
+use student_service::{StudentService, Student, StudentWithAttendance, CreateStudentRequest, UpdateStudentRequest, StudentStatistics, PaymentPlan, PaymentPlanConfig};
 use std::sync::Mutex;
 use tauri::{Manager, State};
 
@@ -27,23 +27,29 @@ async fn get_all_students_with_attendance(state: State<'_, AppState>) -> Result<
 }
 
 #[tauri::command]
-async fn add_student(state: State<'_, AppState>, name: String, group_name: String, paid_amount: i32) -> Result<Student, String> {
+async fn add_student(state: State<'_, AppState>, name: String, group_name: String, payment_plan: String, plan_amount: i32, installment_count: Option<i32>) -> Result<Student, String> {
     let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    let payment_plan_enum = PaymentPlan::from_str(&payment_plan).map_err(|e| format!("Invalid payment plan: {}", e))?;
     let request = CreateStudentRequest {
         name,
         group_name,
-        paid_amount,
+        payment_plan: payment_plan_enum,
+        plan_amount,
+        installment_count,
     };
     StudentService::create_student(&db, request).map_err(|e| format!("Failed to create student: {}", e))
 }
 
 #[tauri::command]
-async fn update_student(state: State<'_, AppState>, id: String, name: String, group_name: String, paid_amount: i32) -> Result<(), String> {
+async fn update_student(state: State<'_, AppState>, id: String, name: String, group_name: String, payment_plan: String, plan_amount: i32, installment_count: Option<i32>) -> Result<(), String> {
     let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    let payment_plan_enum = PaymentPlan::from_str(&payment_plan).map_err(|e| format!("Invalid payment plan: {}", e))?;
     let request = UpdateStudentRequest {
         name,
         group_name,
-        paid_amount,
+        payment_plan: payment_plan_enum,
+        plan_amount,
+        installment_count,
     };
     StudentService::update_student(&db, &id, request).map_err(|e| format!("Failed to update student: {}", e))
 }
@@ -67,9 +73,33 @@ async fn get_students_by_group(state: State<'_, AppState>, group_name: String) -
 }
 
 #[tauri::command]
-async fn get_students_with_low_payment(state: State<'_, AppState>) -> Result<Vec<Student>, String> {
+async fn get_students_by_payment_status(state: State<'_, AppState>, status: String) -> Result<Vec<Student>, String> {
     let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
-    StudentService::get_students_with_low_payment(&db).map_err(|e| format!("Failed to get students with low payment: {}", e))
+    StudentService::get_students_by_payment_status(&db, &status).map_err(|e| format!("Failed to get students by payment status: {}", e))
+}
+
+#[tauri::command]
+async fn get_overdue_students(state: State<'_, AppState>) -> Result<Vec<Student>, String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    StudentService::get_overdue_students(&db).map_err(|e| format!("Failed to get overdue students: {}", e))
+}
+
+#[tauri::command]
+async fn get_due_soon_students(state: State<'_, AppState>) -> Result<Vec<Student>, String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    StudentService::get_due_soon_students(&db).map_err(|e| format!("Failed to get due soon students: {}", e))
+}
+
+#[tauri::command]
+async fn update_payment_statuses(state: State<'_, AppState>) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    StudentService::update_payment_statuses(&db).map_err(|e| format!("Failed to update payment statuses: {}", e))
+}
+
+#[tauri::command]
+async fn get_payment_plan_config(state: State<'_, AppState>) -> Result<PaymentPlanConfig, String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    StudentService::get_payment_plan_config(&db).map_err(|e| format!("Failed to get payment plan config: {}", e))
 }
 
 #[tauri::command]
@@ -176,7 +206,11 @@ pub fn run() {
       delete_student,
       get_student_by_id,
       get_students_by_group,
-      get_students_with_low_payment,
+      get_students_by_payment_status,
+      get_overdue_students,
+      get_due_soon_students,
+      update_payment_statuses,
+      get_payment_plan_config,
       get_student_statistics,
       // Migration commands
       get_migration_history,

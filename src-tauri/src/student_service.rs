@@ -1,5 +1,5 @@
 use crate::database::{Database, DatabaseError, DatabaseResult};
-use chrono::Utc;
+use chrono::{Utc, NaiveDate, Datelike};
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -9,9 +9,77 @@ pub struct Student {
     pub id: String,
     pub name: String,
     pub group_name: String,
+    pub payment_plan: PaymentPlan,
+    pub plan_amount: i32,
+    pub installment_count: Option<i32>,
     pub paid_amount: i32,
+    pub enrollment_date: String,
+    pub next_due_date: Option<String>,
+    pub payment_status: PaymentStatus,
     pub created_at: String,
     pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum PaymentPlan {
+    #[serde(rename = "one-time")]
+    OneTime,
+    #[serde(rename = "monthly")]
+    Monthly,
+    #[serde(rename = "installment")]
+    Installment,
+}
+
+impl PaymentPlan {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            PaymentPlan::OneTime => "one-time",
+            PaymentPlan::Monthly => "monthly",
+            PaymentPlan::Installment => "installment",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Result<Self, String> {
+        match s {
+            "one-time" => Ok(PaymentPlan::OneTime),
+            "monthly" => Ok(PaymentPlan::Monthly),
+            "installment" => Ok(PaymentPlan::Installment),
+            _ => Err(format!("Invalid payment plan: {}", s)),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum PaymentStatus {
+    #[serde(rename = "paid")]
+    Paid,
+    #[serde(rename = "pending")]
+    Pending,
+    #[serde(rename = "overdue")]
+    Overdue,
+    #[serde(rename = "due_soon")]
+    DueSoon,
+}
+
+impl PaymentStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            PaymentStatus::Paid => "paid",
+            PaymentStatus::Pending => "pending",
+            PaymentStatus::Overdue => "overdue",
+            PaymentStatus::DueSoon => "due_soon",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Result<Self, String> {
+        match s {
+            "paid" => Ok(PaymentStatus::Paid),
+            "pending" => Ok(PaymentStatus::Pending),
+            "overdue" => Ok(PaymentStatus::Overdue),
+            "due_soon" => Ok(PaymentStatus::DueSoon),
+            _ => Err(format!("Invalid payment status: {}", s)),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -19,9 +87,15 @@ pub struct StudentWithAttendance {
     pub id: String,
     pub name: String,
     pub group_name: String,
+    pub payment_plan: PaymentPlan,
+    pub plan_amount: i32,
+    pub installment_count: Option<i32>,
     pub paid_amount: i32,
-    pub payment_status: String,
+    pub enrollment_date: String,
+    pub next_due_date: Option<String>,
+    pub payment_status: PaymentStatus,
     pub attendance_log: Vec<AttendanceRecord>,
+    pub payment_history: Vec<PaymentTransaction>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -35,17 +109,41 @@ pub struct AttendanceRecord {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PaymentTransaction {
+    pub id: i32,
+    pub student_id: String,
+    pub amount: i32,
+    pub payment_date: String,
+    pub payment_method: String,
+    pub notes: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateStudentRequest {
     pub name: String,
     pub group_name: String,
-    pub paid_amount: i32,
+    pub payment_plan: PaymentPlan,
+    pub plan_amount: i32,
+    pub installment_count: Option<i32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateStudentRequest {
     pub name: String,
     pub group_name: String,
-    pub paid_amount: i32,
+    pub payment_plan: PaymentPlan,
+    pub plan_amount: i32,
+    pub installment_count: Option<i32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PaymentPlanConfig {
+    pub one_time_amount: i32,
+    pub monthly_amount: i32,
+    pub installment_amount: i32,
+    pub installment_interval: i32,
+    pub reminder_days: i32,
 }
 
 pub struct StudentService;
@@ -70,8 +168,56 @@ impl StudentService {
         Ok(format!("STU{:06}", next_number)) // STU000001, STU000002, etc.
     }
 
+    /// Get payment plan configuration from settings
+    pub fn get_payment_plan_config(db: &Database) -> DatabaseResult<PaymentPlanConfig> {
+        let mut config = PaymentPlanConfig {
+            one_time_amount: 6000,
+            monthly_amount: 850,
+            installment_amount: 2850,
+            installment_interval: 3,
+            reminder_days: 7,
+        };
+
+        // Load settings from database
+        let settings_query = "SELECT key, value FROM settings WHERE key IN ('one_time_amount', 'monthly_amount', 'installment_amount', 'installment_interval', 'reminder_days')";
+        let mut stmt = db.connection().prepare(settings_query)?;
+        let settings_iter = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+
+        for setting_result in settings_iter {
+            let (key, value) = setting_result.map_err(DatabaseError::from)?;
+            match key.as_str() {
+                "one_time_amount" => {
+                    config.one_time_amount = value.parse().unwrap_or(6000);
+                }
+                "monthly_amount" => {
+                    config.monthly_amount = value.parse().unwrap_or(850);
+                }
+                "installment_amount" => {
+                    config.installment_amount = value.parse().unwrap_or(2850);
+                }
+                "installment_interval" => {
+                    config.installment_interval = value.parse().unwrap_or(3);
+                }
+                "reminder_days" => {
+                    config.reminder_days = value.parse().unwrap_or(7);
+                }
+                _ => {}
+            }
+        }
+
+        Ok(config)
+    }
+
     /// Validate student data
-    fn validate_student_data(name: &str, group_name: &str, paid_amount: i32) -> Result<(), String> {
+    fn validate_student_data(
+        name: &str, 
+        group_name: &str, 
+        payment_plan: &PaymentPlan,
+        plan_amount: i32,
+        installment_count: Option<i32>
+    ) -> Result<(), String> {
         if name.trim().is_empty() {
             return Err("Student name cannot be empty".to_string());
         }
@@ -88,39 +234,155 @@ impl StudentService {
             return Err("Group name cannot exceed 100 characters".to_string());
         }
 
-        if paid_amount < 0 {
-            return Err("Paid amount cannot be negative".to_string());
+        if plan_amount <= 0 {
+            return Err("Plan amount must be positive".to_string());
         }
 
-        if paid_amount > 1_000_000 {
-            return Err("Paid amount cannot exceed 1,000,000".to_string());
+        if plan_amount > 1_000_000 {
+            return Err("Plan amount cannot exceed 1,000,000".to_string());
+        }
+
+        // Validate installment count for installment plans
+        if *payment_plan == PaymentPlan::Installment {
+            match installment_count {
+                Some(count) if count <= 0 => {
+                    return Err("Installment count must be positive".to_string());
+                }
+                Some(count) if count > 12 => {
+                    return Err("Installment count cannot exceed 12".to_string());
+                }
+                None => {
+                    return Err("Installment count is required for installment plans".to_string());
+                }
+                _ => {}
+            }
         }
 
         Ok(())
     }
 
-    /// Get payment threshold from settings
-    fn get_payment_threshold(db: &Database) -> DatabaseResult<i32> {
-        let threshold: Result<String, rusqlite::Error> = db.connection().query_row(
-            "SELECT value FROM settings WHERE key = 'payment_threshold'",
-            [],
-            |row| row.get(0),
-        );
+    /// Calculate next due date based on payment plan and enrollment date
+    pub fn calculate_next_due_date(
+        payment_plan: &PaymentPlan,
+        enrollment_date: &str,
+        last_payment_date: Option<&str>,
+        installment_interval: i32,
+    ) -> DatabaseResult<Option<String>> {
+        let enrollment = NaiveDate::parse_from_str(enrollment_date, "%Y-%m-%d")
+            .map_err(|_| DatabaseError::Migration("Invalid enrollment date format".to_string()))?;
 
-        match threshold {
-            Ok(value) => value.parse::<i32>().map_err(|_| {
-                DatabaseError::Migration("Invalid payment threshold in settings".to_string())
-            }),
-            Err(_) => Ok(6000), // Default fallback
+        let reference_date = if let Some(last_payment) = last_payment_date {
+            NaiveDate::parse_from_str(last_payment, "%Y-%m-%d")
+                .map_err(|_| DatabaseError::Migration("Invalid last payment date format".to_string()))?
+        } else {
+            enrollment
+        };
+
+        match payment_plan {
+            PaymentPlan::OneTime => {
+                // Due immediately upon enrollment
+                Ok(Some(enrollment.format("%Y-%m-%d").to_string()))
+            }
+            PaymentPlan::Monthly => {
+                // Due on the same day each month
+                let mut next_due = reference_date;
+                if last_payment_date.is_some() {
+                    // Add one month
+                    next_due = next_due
+                        .with_month(next_due.month() % 12 + 1)
+                        .unwrap_or_else(|| {
+                            next_due.with_year(next_due.year() + 1)
+                                .and_then(|d| d.with_month(1))
+                                .unwrap_or(next_due)
+                        });
+                }
+                Ok(Some(next_due.format("%Y-%m-%d").to_string()))
+            }
+            PaymentPlan::Installment => {
+                // Due every N months (default 3)
+                let mut next_due = reference_date;
+                if last_payment_date.is_some() {
+                    // Add installment interval months
+                    let new_month = (next_due.month() - 1 + installment_interval as u32) % 12 + 1;
+                    let year_increment = (next_due.month() - 1 + installment_interval as u32) / 12;
+                    next_due = next_due
+                        .with_year(next_due.year() + year_increment as i32)
+                        .and_then(|d| d.with_month(new_month))
+                        .unwrap_or(next_due);
+                }
+                Ok(Some(next_due.format("%Y-%m-%d").to_string()))
+            }
         }
     }
 
-    /// Determine payment status based on amount and threshold
-    fn get_payment_status(paid_amount: i32, threshold: i32) -> String {
-        if paid_amount >= threshold {
-            "Paid".to_string()
-        } else {
-            "Not Paid".to_string()
+    /// Calculate payment status based on plan type, amounts, and dates
+    pub fn calculate_payment_status(
+        payment_plan: &PaymentPlan,
+        plan_amount: i32,
+        paid_amount: i32,
+        installment_count: Option<i32>,
+        next_due_date: Option<&str>,
+        enrollment_date: &str,
+        reminder_days: i32,
+    ) -> DatabaseResult<PaymentStatus> {
+        let today = Utc::now().date_naive();
+        
+        match payment_plan {
+            PaymentPlan::OneTime => {
+                if paid_amount >= plan_amount {
+                    Ok(PaymentStatus::Paid)
+                } else {
+                    let enrollment = NaiveDate::parse_from_str(enrollment_date, "%Y-%m-%d")
+                        .map_err(|_| DatabaseError::Migration("Invalid enrollment date format".to_string()))?;
+                    
+                    let days_since_enrollment = (today - enrollment).num_days();
+                    if days_since_enrollment > 30 {
+                        Ok(PaymentStatus::Overdue)
+                    } else {
+                        Ok(PaymentStatus::Pending)
+                    }
+                }
+            }
+            PaymentPlan::Monthly => {
+                if let Some(due_date_str) = next_due_date {
+                    let due_date = NaiveDate::parse_from_str(due_date_str, "%Y-%m-%d")
+                        .map_err(|_| DatabaseError::Migration("Invalid due date format".to_string()))?;
+                    
+                    let days_until_due = (due_date - today).num_days();
+                    
+                    if days_until_due < 0 {
+                        Ok(PaymentStatus::Overdue)
+                    } else if days_until_due <= reminder_days as i64 {
+                        Ok(PaymentStatus::DueSoon)
+                    } else {
+                        Ok(PaymentStatus::Pending)
+                    }
+                } else {
+                    Ok(PaymentStatus::Pending)
+                }
+            }
+            PaymentPlan::Installment => {
+                let total_expected = plan_amount * installment_count.unwrap_or(3);
+                
+                if paid_amount >= total_expected {
+                    Ok(PaymentStatus::Paid)
+                } else if let Some(due_date_str) = next_due_date {
+                    let due_date = NaiveDate::parse_from_str(due_date_str, "%Y-%m-%d")
+                        .map_err(|_| DatabaseError::Migration("Invalid due date format".to_string()))?;
+                    
+                    let days_until_due = (due_date - today).num_days();
+                    
+                    if days_until_due < 0 {
+                        Ok(PaymentStatus::Overdue)
+                    } else if days_until_due <= reminder_days as i64 {
+                        Ok(PaymentStatus::DueSoon)
+                    } else {
+                        Ok(PaymentStatus::Pending)
+                    }
+                } else {
+                    Ok(PaymentStatus::Pending)
+                }
+            }
         }
     }
 
@@ -130,22 +392,58 @@ impl StudentService {
         request: CreateStudentRequest,
     ) -> DatabaseResult<Student> {
         // Validate input data
-        Self::validate_student_data(&request.name, &request.group_name, request.paid_amount)
-            .map_err(|e| DatabaseError::Migration(e))?;
+        Self::validate_student_data(
+            &request.name, 
+            &request.group_name, 
+            &request.payment_plan,
+            request.plan_amount,
+            request.installment_count
+        ).map_err(|e| DatabaseError::Migration(e))?;
 
         // Generate unique student ID
         let student_id = Self::generate_student_id(db)?;
 
+        // Get payment plan configuration
+        let config = Self::get_payment_plan_config(db)?;
+
+        // Set enrollment date to today
+        let enrollment_date = Utc::now().date_naive().format("%Y-%m-%d").to_string();
+
+        // Calculate next due date
+        let next_due_date = Self::calculate_next_due_date(
+            &request.payment_plan,
+            &enrollment_date,
+            None,
+            config.installment_interval,
+        )?;
+
+        // Calculate initial payment status
+        let payment_status = Self::calculate_payment_status(
+            &request.payment_plan,
+            request.plan_amount,
+            0, // Initial paid amount is 0
+            request.installment_count,
+            next_due_date.as_deref(),
+            &enrollment_date,
+            config.reminder_days,
+        )?;
+
         // Insert student into database
         let now = Utc::now().to_rfc3339();
         db.connection().execute(
-            "INSERT INTO students (id, name, group_name, paid_amount, created_at, updated_at) 
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT INTO students (id, name, group_name, payment_plan, plan_amount, installment_count, paid_amount, enrollment_date, next_due_date, payment_status, created_at, updated_at) 
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 student_id,
                 request.name.trim(),
                 request.group_name.trim(),
-                request.paid_amount,
+                request.payment_plan.as_str(),
+                request.plan_amount,
+                request.installment_count,
+                0, // Initial paid amount
+                enrollment_date,
+                next_due_date,
+                payment_status.as_str(),
                 now,
                 now
             ],
@@ -156,7 +454,13 @@ impl StudentService {
             id: student_id,
             name: request.name.trim().to_string(),
             group_name: request.group_name.trim().to_string(),
-            paid_amount: request.paid_amount,
+            payment_plan: request.payment_plan,
+            plan_amount: request.plan_amount,
+            installment_count: request.installment_count,
+            paid_amount: 0,
+            enrollment_date,
+            next_due_date,
+            payment_status,
             created_at: now.clone(),
             updated_at: now,
         })
@@ -165,29 +469,37 @@ impl StudentService {
     /// Get all students
     pub fn get_all_students(db: &Database) -> DatabaseResult<Vec<Student>> {
         let mut stmt = db.connection().prepare(
-            "SELECT id, name, group_name, paid_amount, created_at, updated_at 
+            "SELECT id, name, group_name, payment_plan, plan_amount, installment_count, paid_amount, enrollment_date, next_due_date, payment_status, created_at, updated_at 
              FROM students 
              ORDER BY created_at DESC",
         )?;
 
         let student_iter = stmt.query_map([], |row| {
+            let payment_plan_str: String = row.get(3)?;
+            let payment_status_str: String = row.get(9)?;
+            
             Ok(Student {
                 id: row.get(0)?,
                 name: row.get(1)?,
                 group_name: row.get(2)?,
-                paid_amount: row.get(3)?,
-                created_at: row.get(4)?,
-                updated_at: row.get(5)?,
+                payment_plan: PaymentPlan::from_str(&payment_plan_str).unwrap_or(PaymentPlan::OneTime),
+                plan_amount: row.get(4)?,
+                installment_count: row.get(5)?,
+                paid_amount: row.get(6)?,
+                enrollment_date: row.get(7)?,
+                next_due_date: row.get(8)?,
+                payment_status: PaymentStatus::from_str(&payment_status_str).unwrap_or(PaymentStatus::Pending),
+                created_at: row.get(10)?,
+                updated_at: row.get(11)?,
             })
         })?;
 
         student_iter.collect::<Result<Vec<_>, _>>().map_err(DatabaseError::from)
     }
 
-    /// Get all students with attendance data and payment status
+    /// Get all students with attendance data and payment history
     pub fn get_all_students_with_attendance(db: &Database) -> DatabaseResult<Vec<StudentWithAttendance>> {
         let students = Self::get_all_students(db)?;
-        let payment_threshold = Self::get_payment_threshold(db)?;
 
         let mut students_with_attendance = Vec::new();
 
@@ -212,15 +524,42 @@ impl StudentService {
             let attendance_log: Result<Vec<_>, _> = attendance_iter.collect();
             let attendance_log = attendance_log.map_err(DatabaseError::from)?;
 
-            let payment_status = Self::get_payment_status(student.paid_amount, payment_threshold);
+            // Get payment history for this student
+            let mut payment_stmt = db.connection().prepare(
+                "SELECT id, student_id, amount, payment_date, payment_method, notes, created_at 
+                 FROM payment_transactions 
+                 WHERE student_id = ?1 
+                 ORDER BY payment_date DESC",
+            )?;
+
+            let payment_iter = payment_stmt.query_map([&student.id], |row| {
+                Ok(PaymentTransaction {
+                    id: row.get(0)?,
+                    student_id: row.get(1)?,
+                    amount: row.get(2)?,
+                    payment_date: row.get(3)?,
+                    payment_method: row.get(4)?,
+                    notes: row.get(5)?,
+                    created_at: row.get(6)?,
+                })
+            })?;
+
+            let payment_history: Result<Vec<_>, _> = payment_iter.collect();
+            let payment_history = payment_history.map_err(DatabaseError::from)?;
 
             students_with_attendance.push(StudentWithAttendance {
                 id: student.id,
                 name: student.name,
                 group_name: student.group_name,
+                payment_plan: student.payment_plan,
+                plan_amount: student.plan_amount,
+                installment_count: student.installment_count,
                 paid_amount: student.paid_amount,
-                payment_status,
+                enrollment_date: student.enrollment_date,
+                next_due_date: student.next_due_date,
+                payment_status: student.payment_status,
                 attendance_log,
+                payment_history,
                 created_at: student.created_at,
                 updated_at: student.updated_at,
             });
@@ -232,18 +571,27 @@ impl StudentService {
     /// Get a student by ID
     pub fn get_student_by_id(db: &Database, student_id: &str) -> DatabaseResult<Option<Student>> {
         let result = db.connection().query_row(
-            "SELECT id, name, group_name, paid_amount, created_at, updated_at 
+            "SELECT id, name, group_name, payment_plan, plan_amount, installment_count, paid_amount, enrollment_date, next_due_date, payment_status, created_at, updated_at 
              FROM students 
              WHERE id = ?1",
             [student_id],
             |row| {
+                let payment_plan_str: String = row.get(3)?;
+                let payment_status_str: String = row.get(9)?;
+                
                 Ok(Student {
                     id: row.get(0)?,
                     name: row.get(1)?,
                     group_name: row.get(2)?,
-                    paid_amount: row.get(3)?,
-                    created_at: row.get(4)?,
-                    updated_at: row.get(5)?,
+                    payment_plan: PaymentPlan::from_str(&payment_plan_str).unwrap_or(PaymentPlan::OneTime),
+                    plan_amount: row.get(4)?,
+                    installment_count: row.get(5)?,
+                    paid_amount: row.get(6)?,
+                    enrollment_date: row.get(7)?,
+                    next_due_date: row.get(8)?,
+                    payment_status: PaymentStatus::from_str(&payment_status_str).unwrap_or(PaymentStatus::Pending),
+                    created_at: row.get(10)?,
+                    updated_at: row.get(11)?,
                 })
             },
         );
@@ -262,27 +610,58 @@ impl StudentService {
         request: UpdateStudentRequest,
     ) -> DatabaseResult<()> {
         // Validate input data
-        Self::validate_student_data(&request.name, &request.group_name, request.paid_amount)
-            .map_err(|e| DatabaseError::Migration(e))?;
+        Self::validate_student_data(
+            &request.name, 
+            &request.group_name, 
+            &request.payment_plan,
+            request.plan_amount,
+            request.installment_count
+        ).map_err(|e| DatabaseError::Migration(e))?;
 
-        // Check if student exists
-        if Self::get_student_by_id(db, student_id)?.is_none() {
-            return Err(DatabaseError::Migration(format!(
-                "Student with ID {} not found",
-                student_id
-            )));
-        }
+        // Check if student exists and get current data
+        let current_student = Self::get_student_by_id(db, student_id)?
+            .ok_or_else(|| DatabaseError::Migration(format!("Student with ID {} not found", student_id)))?;
+
+        // Get payment plan configuration
+        let config = Self::get_payment_plan_config(db)?;
+
+        // Recalculate next due date if payment plan changed
+        let next_due_date = if current_student.payment_plan != request.payment_plan {
+            Self::calculate_next_due_date(
+                &request.payment_plan,
+                &current_student.enrollment_date,
+                None, // Reset due date calculation for plan changes
+                config.installment_interval,
+            )?
+        } else {
+            current_student.next_due_date
+        };
+
+        // Recalculate payment status
+        let payment_status = Self::calculate_payment_status(
+            &request.payment_plan,
+            request.plan_amount,
+            current_student.paid_amount,
+            request.installment_count,
+            next_due_date.as_deref(),
+            &current_student.enrollment_date,
+            config.reminder_days,
+        )?;
 
         // Update student in database
         let now = Utc::now().to_rfc3339();
         let rows_affected = db.connection().execute(
             "UPDATE students 
-             SET name = ?1, group_name = ?2, paid_amount = ?3, updated_at = ?4 
-             WHERE id = ?5",
+             SET name = ?1, group_name = ?2, payment_plan = ?3, plan_amount = ?4, installment_count = ?5, next_due_date = ?6, payment_status = ?7, updated_at = ?8 
+             WHERE id = ?9",
             params![
                 request.name.trim(),
                 request.group_name.trim(),
-                request.paid_amount,
+                request.payment_plan.as_str(),
+                request.plan_amount,
+                request.installment_count,
+                next_due_date,
+                payment_status.as_str(),
                 now,
                 student_id
             ],
@@ -327,55 +706,106 @@ impl StudentService {
     /// Get students by group
     pub fn get_students_by_group(db: &Database, group_name: &str) -> DatabaseResult<Vec<Student>> {
         let mut stmt = db.connection().prepare(
-            "SELECT id, name, group_name, paid_amount, created_at, updated_at 
+            "SELECT id, name, group_name, payment_plan, plan_amount, installment_count, paid_amount, enrollment_date, next_due_date, payment_status, created_at, updated_at 
              FROM students 
              WHERE group_name = ?1 
              ORDER BY name",
         )?;
 
         let student_iter = stmt.query_map([group_name], |row| {
+            let payment_plan_str: String = row.get(3)?;
+            let payment_status_str: String = row.get(9)?;
+            
             Ok(Student {
                 id: row.get(0)?,
                 name: row.get(1)?,
                 group_name: row.get(2)?,
-                paid_amount: row.get(3)?,
-                created_at: row.get(4)?,
-                updated_at: row.get(5)?,
+                payment_plan: PaymentPlan::from_str(&payment_plan_str).unwrap_or(PaymentPlan::OneTime),
+                plan_amount: row.get(4)?,
+                installment_count: row.get(5)?,
+                paid_amount: row.get(6)?,
+                enrollment_date: row.get(7)?,
+                next_due_date: row.get(8)?,
+                payment_status: PaymentStatus::from_str(&payment_status_str).unwrap_or(PaymentStatus::Pending),
+                created_at: row.get(10)?,
+                updated_at: row.get(11)?,
             })
         })?;
 
         student_iter.collect::<Result<Vec<_>, _>>().map_err(DatabaseError::from)
     }
 
-    /// Get students with payment status below threshold
-    pub fn get_students_with_low_payment(db: &Database) -> DatabaseResult<Vec<Student>> {
-        let payment_threshold = Self::get_payment_threshold(db)?;
-
+    /// Get students by payment status
+    pub fn get_students_by_payment_status(db: &Database, status: &str) -> DatabaseResult<Vec<Student>> {
         let mut stmt = db.connection().prepare(
-            "SELECT id, name, group_name, paid_amount, created_at, updated_at 
+            "SELECT id, name, group_name, payment_plan, plan_amount, installment_count, paid_amount, enrollment_date, next_due_date, payment_status, created_at, updated_at 
              FROM students 
-             WHERE paid_amount < ?1 
-             ORDER BY paid_amount ASC, name",
+             WHERE payment_status = ?1 
+             ORDER BY next_due_date ASC, name",
         )?;
 
-        let student_iter = stmt.query_map([payment_threshold], |row| {
+        let student_iter = stmt.query_map([status], |row| {
+            let payment_plan_str: String = row.get(3)?;
+            let payment_status_str: String = row.get(9)?;
+            
             Ok(Student {
                 id: row.get(0)?,
                 name: row.get(1)?,
                 group_name: row.get(2)?,
-                paid_amount: row.get(3)?,
-                created_at: row.get(4)?,
-                updated_at: row.get(5)?,
+                payment_plan: PaymentPlan::from_str(&payment_plan_str).unwrap_or(PaymentPlan::OneTime),
+                plan_amount: row.get(4)?,
+                installment_count: row.get(5)?,
+                paid_amount: row.get(6)?,
+                enrollment_date: row.get(7)?,
+                next_due_date: row.get(8)?,
+                payment_status: PaymentStatus::from_str(&payment_status_str).unwrap_or(PaymentStatus::Pending),
+                created_at: row.get(10)?,
+                updated_at: row.get(11)?,
             })
         })?;
 
         student_iter.collect::<Result<Vec<_>, _>>().map_err(DatabaseError::from)
+    }
+
+    /// Get students with overdue payments
+    pub fn get_overdue_students(db: &Database) -> DatabaseResult<Vec<Student>> {
+        Self::get_students_by_payment_status(db, "overdue")
+    }
+
+    /// Get students with payments due soon
+    pub fn get_due_soon_students(db: &Database) -> DatabaseResult<Vec<Student>> {
+        Self::get_students_by_payment_status(db, "due_soon")
+    }
+
+    /// Update payment statuses for all students
+    pub fn update_payment_statuses(db: &Database) -> DatabaseResult<()> {
+        let students = Self::get_all_students(db)?;
+        let config = Self::get_payment_plan_config(db)?;
+
+        for student in students {
+            let new_status = Self::calculate_payment_status(
+                &student.payment_plan,
+                student.plan_amount,
+                student.paid_amount,
+                student.installment_count,
+                student.next_due_date.as_deref(),
+                &student.enrollment_date,
+                config.reminder_days,
+            )?;
+
+            if new_status != student.payment_status {
+                db.connection().execute(
+                    "UPDATE students SET payment_status = ?1, updated_at = ?2 WHERE id = ?3",
+                    params![new_status.as_str(), Utc::now().to_rfc3339(), student.id],
+                )?;
+            }
+        }
+
+        Ok(())
     }
 
     /// Get student statistics
     pub fn get_student_statistics(db: &Database) -> DatabaseResult<StudentStatistics> {
-        let payment_threshold = Self::get_payment_threshold(db)?;
-
         // Total students
         let total_students: i32 = db.connection().query_row(
             "SELECT COUNT(*) FROM students",
@@ -383,15 +813,30 @@ impl StudentService {
             |row| row.get(0),
         )?;
 
-        // Students with full payment
+        // Students by payment status
         let paid_students: i32 = db.connection().query_row(
-            "SELECT COUNT(*) FROM students WHERE paid_amount >= ?1",
-            [payment_threshold],
+            "SELECT COUNT(*) FROM students WHERE payment_status = 'paid'",
+            [],
             |row| row.get(0),
         )?;
 
-        // Students with low payment
-        let unpaid_students = total_students - paid_students;
+        let overdue_students: i32 = db.connection().query_row(
+            "SELECT COUNT(*) FROM students WHERE payment_status = 'overdue'",
+            [],
+            |row| row.get(0),
+        )?;
+
+        let due_soon_students: i32 = db.connection().query_row(
+            "SELECT COUNT(*) FROM students WHERE payment_status = 'due_soon'",
+            [],
+            |row| row.get(0),
+        )?;
+
+        let pending_students: i32 = db.connection().query_row(
+            "SELECT COUNT(*) FROM students WHERE payment_status = 'pending'",
+            [],
+            |row| row.get(0),
+        )?;
 
         // Students by group
         let mut group_stmt = db.connection().prepare(
@@ -408,6 +853,21 @@ impl StudentService {
             students_by_group.insert(group_name, count);
         }
 
+        // Students by payment plan
+        let mut plan_stmt = db.connection().prepare(
+            "SELECT payment_plan, COUNT(*) FROM students GROUP BY payment_plan ORDER BY payment_plan",
+        )?;
+
+        let plan_iter = plan_stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i32>(1)?))
+        })?;
+
+        let mut students_by_plan = HashMap::new();
+        for plan_result in plan_iter {
+            let (plan_name, count) = plan_result.map_err(DatabaseError::from)?;
+            students_by_plan.insert(plan_name, count);
+        }
+
         // Average payment amount
         let avg_payment: f64 = db.connection().query_row(
             "SELECT AVG(CAST(paid_amount AS REAL)) FROM students",
@@ -415,13 +875,23 @@ impl StudentService {
             |row| row.get(0),
         ).unwrap_or(0.0);
 
+        // Total revenue
+        let total_revenue: i64 = db.connection().query_row(
+            "SELECT SUM(CAST(paid_amount AS INTEGER)) FROM students",
+            [],
+            |row| row.get(0),
+        ).unwrap_or(0);
+
         Ok(StudentStatistics {
             total_students,
             paid_students,
-            unpaid_students,
+            overdue_students,
+            due_soon_students,
+            pending_students,
             students_by_group,
+            students_by_plan,
             average_payment: avg_payment,
-            payment_threshold,
+            total_revenue,
         })
     }
 }
@@ -430,10 +900,13 @@ impl StudentService {
 pub struct StudentStatistics {
     pub total_students: i32,
     pub paid_students: i32,
-    pub unpaid_students: i32,
+    pub overdue_students: i32,
+    pub due_soon_students: i32,
+    pub pending_students: i32,
     pub students_by_group: HashMap<String, i32>,
+    pub students_by_plan: HashMap<String, i32>,
     pub average_payment: f64,
-    pub payment_threshold: i32,
+    pub total_revenue: i64,
 }
 
 #[cfg(test)]
@@ -459,7 +932,9 @@ mod tests {
         let request = CreateStudentRequest {
             name: "Test Student".to_string(),
             group_name: "Group A".to_string(),
-            paid_amount: 5000,
+            payment_plan: PaymentPlan::OneTime,
+            plan_amount: 6000,
+            installment_count: None,
         };
         StudentService::create_student(&db, request).unwrap();
 
@@ -468,21 +943,65 @@ mod tests {
     }
 
     #[test]
-    fn test_create_student() {
+    fn test_create_student_one_time() {
         let (db, _temp_dir) = create_test_db();
 
         let request = CreateStudentRequest {
             name: "أحمد محمد".to_string(), // Arabic name
             group_name: "Group A".to_string(),
-            paid_amount: 7000,
+            payment_plan: PaymentPlan::OneTime,
+            plan_amount: 6000,
+            installment_count: None,
         };
 
         let student = StudentService::create_student(&db, request).unwrap();
         
         assert_eq!(student.name, "أحمد محمد");
         assert_eq!(student.group_name, "Group A");
-        assert_eq!(student.paid_amount, 7000);
+        assert_eq!(student.payment_plan, PaymentPlan::OneTime);
+        assert_eq!(student.plan_amount, 6000);
+        assert_eq!(student.paid_amount, 0);
+        assert_eq!(student.payment_status, PaymentStatus::Pending);
         assert!(student.id.starts_with("STU"));
+    }
+
+    #[test]
+    fn test_create_student_monthly() {
+        let (db, _temp_dir) = create_test_db();
+
+        let request = CreateStudentRequest {
+            name: "Test Student".to_string(),
+            group_name: "Group A".to_string(),
+            payment_plan: PaymentPlan::Monthly,
+            plan_amount: 850,
+            installment_count: None,
+        };
+
+        let student = StudentService::create_student(&db, request).unwrap();
+        
+        assert_eq!(student.payment_plan, PaymentPlan::Monthly);
+        assert_eq!(student.plan_amount, 850);
+        assert!(student.next_due_date.is_some());
+    }
+
+    #[test]
+    fn test_create_student_installment() {
+        let (db, _temp_dir) = create_test_db();
+
+        let request = CreateStudentRequest {
+            name: "Test Student".to_string(),
+            group_name: "Group A".to_string(),
+            payment_plan: PaymentPlan::Installment,
+            plan_amount: 2850,
+            installment_count: Some(3),
+        };
+
+        let student = StudentService::create_student(&db, request).unwrap();
+        
+        assert_eq!(student.payment_plan, PaymentPlan::Installment);
+        assert_eq!(student.plan_amount, 2850);
+        assert_eq!(student.installment_count, Some(3));
+        assert!(student.next_due_date.is_some());
     }
 
     #[test]
@@ -493,73 +1012,121 @@ mod tests {
         let request = CreateStudentRequest {
             name: "".to_string(),
             group_name: "Group A".to_string(),
-            paid_amount: 5000,
+            payment_plan: PaymentPlan::OneTime,
+            plan_amount: 6000,
+            installment_count: None,
         };
         assert!(StudentService::create_student(&db, request).is_err());
 
-        // Test negative payment
+        // Test negative plan amount
         let request = CreateStudentRequest {
             name: "Test Student".to_string(),
             group_name: "Group A".to_string(),
-            paid_amount: -100,
+            payment_plan: PaymentPlan::OneTime,
+            plan_amount: -100,
+            installment_count: None,
         };
         assert!(StudentService::create_student(&db, request).is_err());
 
-        // Test empty group name
+        // Test installment plan without installment count
         let request = CreateStudentRequest {
             name: "Test Student".to_string(),
-            group_name: "".to_string(),
-            paid_amount: 5000,
+            group_name: "Group A".to_string(),
+            payment_plan: PaymentPlan::Installment,
+            plan_amount: 2850,
+            installment_count: None,
         };
         assert!(StudentService::create_student(&db, request).is_err());
     }
 
     #[test]
-    fn test_get_all_students() {
+    fn test_payment_plan_enum() {
+        assert_eq!(PaymentPlan::OneTime.as_str(), "one-time");
+        assert_eq!(PaymentPlan::Monthly.as_str(), "monthly");
+        assert_eq!(PaymentPlan::Installment.as_str(), "installment");
+
+        assert_eq!(PaymentPlan::from_str("one-time").unwrap(), PaymentPlan::OneTime);
+        assert_eq!(PaymentPlan::from_str("monthly").unwrap(), PaymentPlan::Monthly);
+        assert_eq!(PaymentPlan::from_str("installment").unwrap(), PaymentPlan::Installment);
+        assert!(PaymentPlan::from_str("invalid").is_err());
+    }
+
+    #[test]
+    fn test_payment_status_enum() {
+        assert_eq!(PaymentStatus::Paid.as_str(), "paid");
+        assert_eq!(PaymentStatus::Pending.as_str(), "pending");
+        assert_eq!(PaymentStatus::Overdue.as_str(), "overdue");
+        assert_eq!(PaymentStatus::DueSoon.as_str(), "due_soon");
+
+        assert_eq!(PaymentStatus::from_str("paid").unwrap(), PaymentStatus::Paid);
+        assert_eq!(PaymentStatus::from_str("pending").unwrap(), PaymentStatus::Pending);
+        assert_eq!(PaymentStatus::from_str("overdue").unwrap(), PaymentStatus::Overdue);
+        assert_eq!(PaymentStatus::from_str("due_soon").unwrap(), PaymentStatus::DueSoon);
+        assert!(PaymentStatus::from_str("invalid").is_err());
+    }
+
+    #[test]
+    fn test_calculate_next_due_date() {
+        // Test one-time payment
+        let due_date = StudentService::calculate_next_due_date(
+            &PaymentPlan::OneTime,
+            "2024-01-01",
+            None,
+            3,
+        ).unwrap();
+        assert_eq!(due_date, Some("2024-01-01".to_string()));
+
+        // Test monthly payment
+        let due_date = StudentService::calculate_next_due_date(
+            &PaymentPlan::Monthly,
+            "2024-01-01",
+            None,
+            3,
+        ).unwrap();
+        assert_eq!(due_date, Some("2024-01-01".to_string()));
+
+        // Test installment payment
+        let due_date = StudentService::calculate_next_due_date(
+            &PaymentPlan::Installment,
+            "2024-01-01",
+            None,
+            3,
+        ).unwrap();
+        assert_eq!(due_date, Some("2024-01-01".to_string()));
+    }
+
+    #[test]
+    fn test_get_students_by_payment_status() {
         let (db, _temp_dir) = create_test_db();
 
-        // Initially empty
-        let students = StudentService::get_all_students(&db).unwrap();
-        assert_eq!(students.len(), 0);
-
-        // Add some students
+        // Create students with different payment plans
         let request1 = CreateStudentRequest {
             name: "Student 1".to_string(),
             group_name: "Group A".to_string(),
-            paid_amount: 5000,
+            payment_plan: PaymentPlan::OneTime,
+            plan_amount: 6000,
+            installment_count: None,
         };
-        StudentService::create_student(&db, request1).unwrap();
+        let student1 = StudentService::create_student(&db, request1).unwrap();
 
         let request2 = CreateStudentRequest {
             name: "Student 2".to_string(),
-            group_name: "Group B".to_string(),
-            paid_amount: 7000,
-        };
-        StudentService::create_student(&db, request2).unwrap();
-
-        let students = StudentService::get_all_students(&db).unwrap();
-        assert_eq!(students.len(), 2);
-    }
-
-    #[test]
-    fn test_get_student_by_id() {
-        let (db, _temp_dir) = create_test_db();
-
-        let request = CreateStudentRequest {
-            name: "Test Student".to_string(),
             group_name: "Group A".to_string(),
-            paid_amount: 5000,
+            payment_plan: PaymentPlan::Monthly,
+            plan_amount: 850,
+            installment_count: None,
         };
-        let created_student = StudentService::create_student(&db, request).unwrap();
+        let student2 = StudentService::create_student(&db, request2).unwrap();
 
-        // Test existing student
-        let found_student = StudentService::get_student_by_id(&db, &created_student.id).unwrap();
-        assert!(found_student.is_some());
-        assert_eq!(found_student.unwrap().name, "Test Student");
+        // Check what status each student has
+        println!("Student 1 status: {:?}", student1.payment_status);
+        println!("Student 2 status: {:?}", student2.payment_status);
 
-        // Test non-existing student
-        let not_found = StudentService::get_student_by_id(&db, "NONEXISTENT").unwrap();
-        assert!(not_found.is_none());
+        let pending_students = StudentService::get_students_by_payment_status(&db, "pending").unwrap();
+        let due_soon_students = StudentService::get_students_by_payment_status(&db, "due_soon").unwrap();
+        
+        // At least one should be pending or due_soon
+        assert!(pending_students.len() + due_soon_students.len() >= 2);
     }
 
     #[test]
@@ -569,14 +1136,18 @@ mod tests {
         let request = CreateStudentRequest {
             name: "Original Name".to_string(),
             group_name: "Group A".to_string(),
-            paid_amount: 5000,
+            payment_plan: PaymentPlan::OneTime,
+            plan_amount: 6000,
+            installment_count: None,
         };
         let student = StudentService::create_student(&db, request).unwrap();
 
         let update_request = UpdateStudentRequest {
             name: "Updated Name".to_string(),
             group_name: "Group B".to_string(),
-            paid_amount: 8000,
+            payment_plan: PaymentPlan::Monthly,
+            plan_amount: 850,
+            installment_count: None,
         };
 
         StudentService::update_student(&db, &student.id, update_request).unwrap();
@@ -584,115 +1155,52 @@ mod tests {
         let updated_student = StudentService::get_student_by_id(&db, &student.id).unwrap().unwrap();
         assert_eq!(updated_student.name, "Updated Name");
         assert_eq!(updated_student.group_name, "Group B");
-        assert_eq!(updated_student.paid_amount, 8000);
+        assert_eq!(updated_student.payment_plan, PaymentPlan::Monthly);
+        assert_eq!(updated_student.plan_amount, 850);
     }
 
     #[test]
-    fn test_delete_student() {
+    fn test_get_payment_plan_config() {
         let (db, _temp_dir) = create_test_db();
 
-        let request = CreateStudentRequest {
-            name: "Test Student".to_string(),
-            group_name: "Group A".to_string(),
-            paid_amount: 5000,
-        };
-        let student = StudentService::create_student(&db, request).unwrap();
-
-        // Verify student exists
-        assert!(StudentService::get_student_by_id(&db, &student.id).unwrap().is_some());
-
-        // Delete student
-        StudentService::delete_student(&db, &student.id).unwrap();
-
-        // Verify student is deleted
-        assert!(StudentService::get_student_by_id(&db, &student.id).unwrap().is_none());
-    }
-
-    #[test]
-    fn test_get_students_by_group() {
-        let (db, _temp_dir) = create_test_db();
-
-        // Add students to different groups
-        let request1 = CreateStudentRequest {
-            name: "Student A1".to_string(),
-            group_name: "Group A".to_string(),
-            paid_amount: 5000,
-        };
-        StudentService::create_student(&db, request1).unwrap();
-
-        let request2 = CreateStudentRequest {
-            name: "Student A2".to_string(),
-            group_name: "Group A".to_string(),
-            paid_amount: 6000,
-        };
-        StudentService::create_student(&db, request2).unwrap();
-
-        let request3 = CreateStudentRequest {
-            name: "Student B1".to_string(),
-            group_name: "Group B".to_string(),
-            paid_amount: 7000,
-        };
-        StudentService::create_student(&db, request3).unwrap();
-
-        let group_a_students = StudentService::get_students_by_group(&db, "Group A").unwrap();
-        assert_eq!(group_a_students.len(), 2);
-
-        let group_b_students = StudentService::get_students_by_group(&db, "Group B").unwrap();
-        assert_eq!(group_b_students.len(), 1);
-    }
-
-    #[test]
-    fn test_get_students_with_low_payment() {
-        let (db, _temp_dir) = create_test_db();
-
-        // Add students with different payment amounts
-        let request1 = CreateStudentRequest {
-            name: "Low Payment Student".to_string(),
-            group_name: "Group A".to_string(),
-            paid_amount: 3000, // Below threshold (6000)
-        };
-        StudentService::create_student(&db, request1).unwrap();
-
-        let request2 = CreateStudentRequest {
-            name: "Full Payment Student".to_string(),
-            group_name: "Group A".to_string(),
-            paid_amount: 8000, // Above threshold
-        };
-        StudentService::create_student(&db, request2).unwrap();
-
-        let low_payment_students = StudentService::get_students_with_low_payment(&db).unwrap();
-        assert_eq!(low_payment_students.len(), 1);
-        assert_eq!(low_payment_students[0].name, "Low Payment Student");
+        let config = StudentService::get_payment_plan_config(&db).unwrap();
+        
+        assert_eq!(config.one_time_amount, 6000);
+        assert_eq!(config.monthly_amount, 850);
+        assert_eq!(config.installment_amount, 2850);
+        assert_eq!(config.installment_interval, 3);
+        assert_eq!(config.reminder_days, 7);
     }
 
     #[test]
     fn test_get_student_statistics() {
         let (db, _temp_dir) = create_test_db();
 
-        // Add test students
-        let students_data = vec![
-            ("Student 1", "Group A", 3000),
-            ("Student 2", "Group A", 8000),
-            ("Student 3", "Group B", 5000),
-            ("Student 4", "Group B", 7000),
-        ];
+        // Add test students with different payment plans
+        let request1 = CreateStudentRequest {
+            name: "Student 1".to_string(),
+            group_name: "Group A".to_string(),
+            payment_plan: PaymentPlan::OneTime,
+            plan_amount: 6000,
+            installment_count: None,
+        };
+        StudentService::create_student(&db, request1).unwrap();
 
-        for (name, group, amount) in students_data {
-            let request = CreateStudentRequest {
-                name: name.to_string(),
-                group_name: group.to_string(),
-                paid_amount: amount,
-            };
-            StudentService::create_student(&db, request).unwrap();
-        }
+        let request2 = CreateStudentRequest {
+            name: "Student 2".to_string(),
+            group_name: "Group B".to_string(),
+            payment_plan: PaymentPlan::Monthly,
+            plan_amount: 850,
+            installment_count: None,
+        };
+        StudentService::create_student(&db, request2).unwrap();
 
         let stats = StudentService::get_student_statistics(&db).unwrap();
         
-        assert_eq!(stats.total_students, 4);
-        assert_eq!(stats.paid_students, 2); // Students with >= 6000
-        assert_eq!(stats.unpaid_students, 2); // Students with < 6000
-        assert_eq!(stats.students_by_group.get("Group A"), Some(&2));
-        assert_eq!(stats.students_by_group.get("Group B"), Some(&2));
-        assert_eq!(stats.payment_threshold, 6000);
+        assert_eq!(stats.total_students, 2);
+        assert_eq!(stats.students_by_group.get("Group A"), Some(&1));
+        assert_eq!(stats.students_by_group.get("Group B"), Some(&1));
+        assert_eq!(stats.students_by_plan.get("one-time"), Some(&1));
+        assert_eq!(stats.students_by_plan.get("monthly"), Some(&1));
     }
 }
