@@ -61,3 +61,31 @@ export interface ExportOptions {
   };
   groups?: string[];
 }
+
+// Migration-related interfaces
+export interface AppliedMigration {
+  version: number;
+  description: string;
+  appliedAt: string;
+}
+
+export interface MigrationValidation {
+  isValid: boolean;
+  issues: string[];
+  appliedCount: number;
+  totalCount: number;
+}
+
+export interface SchemaInfo {
+  currentVersion: number;
+  latestVersion: number;
+  pendingMigrations: number;
+  isUpToDate: boolean;
+}
+
+export interface DatabaseStats {
+  studentsCount: number;
+  attendanceCount: number;
+  auditLogCount: number;
+  databaseSizeBytes: number;
+}

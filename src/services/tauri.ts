@@ -1,5 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
-import { Student, AttendanceRecord, AppSettings } from "../types";
+import {
+  Student,
+  AttendanceRecord,
+  AppSettings,
+  AppliedMigration,
+  MigrationValidation,
+  SchemaInfo,
+} from "../types";
 
 // Student service functions
 export const studentService = {
@@ -86,5 +93,31 @@ export const backupService = {
 
   async validateBackup(filePath: string): Promise<boolean> {
     return await invoke("validate_backup", { filePath });
+  },
+};
+
+// Migration service functions
+export const migrationService = {
+  async getMigrationHistory(): Promise<AppliedMigration[]> {
+    return await invoke("get_migration_history");
+  },
+
+  async getSchemaInfo(): Promise<SchemaInfo> {
+    return await invoke("get_schema_info");
+  },
+
+  async validateMigrations(): Promise<MigrationValidation> {
+    return await invoke("validate_migrations");
+  },
+
+  async forceApplyMigration(version: number): Promise<void> {
+    return await invoke("force_apply_migration", { version });
+  },
+
+  async markMigrationApplied(
+    version: number,
+    description: string
+  ): Promise<void> {
+    return await invoke("mark_migration_applied", { version, description });
   },
 };
