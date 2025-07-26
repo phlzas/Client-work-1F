@@ -9,6 +9,7 @@ An offline-first desktop application for educational institutions, specifically 
 - **Payment Tracking**: Visual highlighting of students with payments below 6000 EGP threshold
 - **Arabic/RTL Support**: Full right-to-left text support for Arabic names and content
 - **Data Export**: CSV export functionality for attendance records and payment summaries
+- **Backup & Restore**: Database backup with optional AES encryption for data security
 - **Offline Operation**: Complete local functionality using SQLite database
 
 ## Technology Stack
@@ -24,7 +25,9 @@ An offline-first desktop application for educational institutions, specifically 
 
 - **Rust** for backend services and business logic
 - **Tauri 2.0** for desktop application packaging and IPC
-- **SQLite 3** for local data storage
+- **SQLite 3** with rusqlite for local data storage
+- **Chrono** for date/time handling
+- **Thiserror** for structured error handling
 
 ## Prerequisites
 
@@ -112,6 +115,14 @@ npm run tauri
 - `typescript` - TypeScript compiler
 - `vite` - Build tool and development server
 - `eslint` - Code linting and quality
+
+### Backend Dependencies
+
+- `rusqlite` - SQLite database interface with bundled SQLite and backup support
+- `chrono` - Date and time library with serde support
+- `thiserror` - Ergonomic error handling
+- `serde` - Serialization framework
+- `tauri` - Desktop application framework
 
 ## Building for Production
 
