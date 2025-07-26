@@ -1,14 +1,81 @@
 mod database;
+mod student_service;
 #[cfg(test)]
 mod database_integration_test;
 
 use database::{Database, AppliedMigration, MigrationValidation, SchemaInfo, Migration, RollbackInfo};
+use student_service::{StudentService, Student, StudentWithAttendance, CreateStudentRequest, UpdateStudentRequest, StudentStatistics};
 use std::sync::Mutex;
 use tauri::{Manager, State};
 
 // Global database instance
 pub struct AppState {
     pub db: Mutex<Database>,
+}
+
+// Student-related IPC commands
+#[tauri::command]
+async fn get_all_students(state: State<'_, AppState>) -> Result<Vec<Student>, String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    StudentService::get_all_students(&db).map_err(|e| format!("Failed to get students: {}", e))
+}
+
+#[tauri::command]
+async fn get_all_students_with_attendance(state: State<'_, AppState>) -> Result<Vec<StudentWithAttendance>, String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    StudentService::get_all_students_with_attendance(&db).map_err(|e| format!("Failed to get students with attendance: {}", e))
+}
+
+#[tauri::command]
+async fn add_student(state: State<'_, AppState>, name: String, group_name: String, paid_amount: i32) -> Result<Student, String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    let request = CreateStudentRequest {
+        name,
+        group_name,
+        paid_amount,
+    };
+    StudentService::create_student(&db, request).map_err(|e| format!("Failed to create student: {}", e))
+}
+
+#[tauri::command]
+async fn update_student(state: State<'_, AppState>, id: String, name: String, group_name: String, paid_amount: i32) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    let request = UpdateStudentRequest {
+        name,
+        group_name,
+        paid_amount,
+    };
+    StudentService::update_student(&db, &id, request).map_err(|e| format!("Failed to update student: {}", e))
+}
+
+#[tauri::command]
+async fn delete_student(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    StudentService::delete_student(&db, &id).map_err(|e| format!("Failed to delete student: {}", e))
+}
+
+#[tauri::command]
+async fn get_student_by_id(state: State<'_, AppState>, id: String) -> Result<Option<Student>, String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    StudentService::get_student_by_id(&db, &id).map_err(|e| format!("Failed to get student: {}", e))
+}
+
+#[tauri::command]
+async fn get_students_by_group(state: State<'_, AppState>, group_name: String) -> Result<Vec<Student>, String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    StudentService::get_students_by_group(&db, &group_name).map_err(|e| format!("Failed to get students by group: {}", e))
+}
+
+#[tauri::command]
+async fn get_students_with_low_payment(state: State<'_, AppState>) -> Result<Vec<Student>, String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    StudentService::get_students_with_low_payment(&db).map_err(|e| format!("Failed to get students with low payment: {}", e))
+}
+
+#[tauri::command]
+async fn get_student_statistics(state: State<'_, AppState>) -> Result<StudentStatistics, String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    StudentService::get_student_statistics(&db).map_err(|e| format!("Failed to get student statistics: {}", e))
 }
 
 // Migration-related IPC commands
@@ -101,6 +168,17 @@ pub fn run() {
       Ok(())
     })
     .invoke_handler(tauri::generate_handler![
+      // Student commands
+      get_all_students,
+      get_all_students_with_attendance,
+      add_student,
+      update_student,
+      delete_student,
+      get_student_by_id,
+      get_students_by_group,
+      get_students_with_low_payment,
+      get_student_statistics,
+      // Migration commands
       get_migration_history,
       get_schema_info,
       validate_migrations,
