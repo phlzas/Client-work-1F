@@ -1,13 +1,15 @@
 use crate::database::{Database, DatabaseError, DatabaseResult};
 use crate::audit_service::AuditService;
 use crate::student_service::{StudentService, PaymentPlan, PaymentStatus};
-use chrono::{Utc, NaiveDate, Datelike};
+use chrono::{Utc, NaiveDate};
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
-// Constants
-const MAX_PAYMENT_AMOUNT: i32 = 1_000_000;
-const DEFAULT_RECENT_PAYMENTS_LIMIT: usize = 10;
+// Business logic constants - consider making these configurable
+const MAX_PAYMENT_AMOUNT: i32 = 1_000_000; // Maximum allowed payment amount in cents/smallest currency unit
+const DEFAULT_RECENT_PAYMENTS_LIMIT: usize = 10; // Number of recent payments to show in summary
+const DAYS_PER_MONTH: f64 = 30.44; // Average days per month for monthly payment calculations
+const DEFAULT_INSTALLMENT_COUNT: i32 = 3; // Default number of installments when not specified
 
 // Custom error types for better error handling
 #[derive(Debug)]
@@ -42,6 +44,12 @@ impl std::fmt::Display for PaymentError {
 impl std::error::Error for PaymentError {}
 
 pub type PaymentResult<T> = Result<T, PaymentError>;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BatchUpdateResult {
+    pub successful_updates: i32,
+    pub failed_updates: Vec<(String, String)>, // (student_id, error_message)
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PaymentTransaction {
@@ -80,6 +88,10 @@ impl PaymentMethod {
             "check" => Ok(PaymentMethod::Check),
             _ => Err(format!("Invalid payment method: {}", s)),
         }
+    }
+
+    pub fn validate_str(s: &str) -> bool {
+        matches!(s, "cash" | "bank_transfer" | "check")
     }
 }
 
@@ -164,6 +176,119 @@ pub struct PaginatedPaymentHistory {
 pub struct PaymentService;
 
 impl PaymentService {
+    /// Create database indexes for better performance
+    pub fn create_indexes(db: &Database) -> DatabaseResult<()> {
+        let indexes = [
+            "CREATE INDEX IF NOT EXISTS idx_payment_transactions_student_date ON payment_transactions(student_id, payment_date DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_payment_transactions_date ON payment_transactions(payment_date DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_payment_transactions_method ON payment_transactions(payment_method)",
+            "CREATE INDEX IF NOT EXISTS idx_students_payment_status ON students(payment_status)",
+            "CREATE INDEX IF NOT EXISTS idx_students_payment_plan ON students(payment_plan)",
+        ];
+
+        for index_sql in &indexes {
+            db.connection().execute(index_sql, [])?;
+        }
+
+        Ok(())
+    }
+    /// Build payment query with filters
+    fn build_payment_query(
+        filter: &Option<PaymentHistoryFilter>,
+    ) -> (String, String, Vec<Box<dyn rusqlite::ToSql>>) {
+        let mut query = "SELECT id, student_id, amount, payment_date, payment_method, notes, created_at FROM payment_transactions".to_string();
+        let mut count_query = "SELECT COUNT(*) FROM payment_transactions".to_string();
+        let mut conditions = Vec::new();
+        let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+
+        if let Some(f) = filter {
+            if let Some(student_id) = &f.student_id {
+                conditions.push("student_id = ?".to_string());
+                params.push(Box::new(student_id.clone()));
+            }
+
+            if let Some(start_date) = &f.start_date {
+                conditions.push("payment_date >= ?".to_string());
+                params.push(Box::new(start_date.clone()));
+            }
+
+            if let Some(end_date) = &f.end_date {
+                conditions.push("payment_date <= ?".to_string());
+                params.push(Box::new(end_date.clone()));
+            }
+
+            if let Some(payment_method) = &f.payment_method {
+                conditions.push("payment_method = ?".to_string());
+                params.push(Box::new(payment_method.as_str().to_string()));
+            }
+
+            if let Some(min_amount) = f.min_amount {
+                conditions.push("amount >= ?".to_string());
+                params.push(Box::new(min_amount));
+            }
+
+            if let Some(max_amount) = f.max_amount {
+                conditions.push("amount <= ?".to_string());
+                params.push(Box::new(max_amount));
+            }
+        }
+
+        if !conditions.is_empty() {
+            let where_clause = format!(" WHERE {}", conditions.join(" AND "));
+            query.push_str(&where_clause);
+            count_query.push_str(&where_clause);
+        }
+
+        (query, count_query, params)
+    }
+
+    /// Calculate expected amount based on payment plan
+    /// 
+    /// # Arguments
+    /// * `payment_plan` - The type of payment plan (OneTime, Monthly, Installment)
+    /// * `plan_amount` - Base amount for the plan
+    /// * `enrollment_date` - Student enrollment date in YYYY-MM-DD format
+    /// * `installment_count` - Number of installments (used for Installment plan)
+    /// 
+    /// # Returns
+    /// Expected total amount the student should have paid by now
+    fn calculate_expected_amount(
+        payment_plan: &PaymentPlan,
+        plan_amount: i32,
+        enrollment_date: &str,
+        installment_count: Option<i32>,
+    ) -> Result<i64, DatabaseError> {
+        match payment_plan {
+            PaymentPlan::OneTime => Ok(plan_amount as i64),
+            PaymentPlan::Monthly => {
+                let enrollment = NaiveDate::parse_from_str(enrollment_date, "%Y-%m-%d")
+                    .map_err(|_| DatabaseError::Migration("Invalid enrollment date".to_string()))?;
+                let today = Utc::now().date_naive();
+                let days_enrolled = (today - enrollment).num_days() as f64;
+                let months_enrolled = ((days_enrolled / DAYS_PER_MONTH) as i32) + 1;
+                Ok((plan_amount as i64) * (months_enrolled.max(1) as i64))
+            }
+            PaymentPlan::Installment => {
+                Ok((plan_amount as i64) * (installment_count.unwrap_or(DEFAULT_INSTALLMENT_COUNT) as i64))
+            }
+        }
+    }
+
+    /// Parse payment transaction from database row
+    fn parse_payment_transaction(row: &rusqlite::Row) -> Result<PaymentTransaction, rusqlite::Error> {
+        let payment_method_str: String = row.get(4)?;
+        Ok(PaymentTransaction {
+            id: row.get(0)?,
+            student_id: row.get(1)?,
+            amount: row.get(2)?,
+            payment_date: row.get(3)?,
+            payment_method: PaymentMethod::from_str(&payment_method_str)
+                .map_err(|_| rusqlite::Error::InvalidColumnType(4, "payment_method".to_string(), rusqlite::types::Type::Text))?,
+            notes: row.get(5)?,
+            created_at: row.get(6)?,
+        })
+    }
+
     /// Validate payment data
     fn validate_payment_data(
         student_id: &str,
@@ -294,48 +419,7 @@ impl PaymentService {
         db: &Database,
         request: PaymentHistoryRequest,
     ) -> DatabaseResult<PaginatedPaymentHistory> {
-        let mut query = "SELECT id, student_id, amount, payment_date, payment_method, notes, created_at FROM payment_transactions".to_string();
-        let mut count_query = "SELECT COUNT(*) FROM payment_transactions".to_string();
-        let mut conditions = Vec::new();
-        let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-
-        if let Some(f) = &request.filter {
-            if let Some(student_id) = &f.student_id {
-                conditions.push("student_id = ?".to_string());
-                params.push(Box::new(student_id.clone()));
-            }
-
-            if let Some(start_date) = &f.start_date {
-                conditions.push("payment_date >= ?".to_string());
-                params.push(Box::new(start_date.clone()));
-            }
-
-            if let Some(end_date) = &f.end_date {
-                conditions.push("payment_date <= ?".to_string());
-                params.push(Box::new(end_date.clone()));
-            }
-
-            if let Some(payment_method) = &f.payment_method {
-                conditions.push("payment_method = ?".to_string());
-                params.push(Box::new(payment_method.as_str().to_string()));
-            }
-
-            if let Some(min_amount) = f.min_amount {
-                conditions.push("amount >= ?".to_string());
-                params.push(Box::new(min_amount));
-            }
-
-            if let Some(max_amount) = f.max_amount {
-                conditions.push("amount <= ?".to_string());
-                params.push(Box::new(max_amount));
-            }
-        }
-
-        if !conditions.is_empty() {
-            let where_clause = format!(" WHERE {}", conditions.join(" AND "));
-            query.push_str(&where_clause);
-            count_query.push_str(&where_clause);
-        }
+        let (mut query, count_query, params) = Self::build_payment_query(&request.filter);
 
         // Get total count
         let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
@@ -352,19 +436,7 @@ impl PaymentService {
         }
 
         let mut stmt = db.connection().prepare(&query)?;
-        let payment_iter = stmt.query_map(&param_refs[..], |row| {
-            let payment_method_str: String = row.get(4)?;
-            Ok(PaymentTransaction {
-                id: row.get(0)?,
-                student_id: row.get(1)?,
-                amount: row.get(2)?,
-                payment_date: row.get(3)?,
-                payment_method: PaymentMethod::from_str(&payment_method_str)
-                    .map_err(|_| rusqlite::Error::InvalidColumnType(4, "payment_method".to_string(), rusqlite::types::Type::Text))?,
-                notes: row.get(5)?,
-                created_at: row.get(6)?,
-            })
-        })?;
+        let payment_iter = stmt.query_map(&param_refs[..], Self::parse_payment_transaction)?;
 
         let payments: Vec<PaymentTransaction> = payment_iter.collect::<Result<Vec<_>, _>>()?;
         let returned_count = payments.len() as i32;
@@ -382,65 +454,14 @@ impl PaymentService {
         db: &Database,
         filter: Option<PaymentHistoryFilter>,
     ) -> DatabaseResult<Vec<PaymentTransaction>> {
-        let mut query = "SELECT id, student_id, amount, payment_date, payment_method, notes, created_at FROM payment_transactions".to_string();
-        let mut conditions = Vec::new();
-        let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-
-        if let Some(f) = &filter {
-            if let Some(student_id) = &f.student_id {
-                conditions.push("student_id = ?".to_string());
-                params.push(Box::new(student_id.clone()));
-            }
-
-            if let Some(start_date) = &f.start_date {
-                conditions.push("payment_date >= ?".to_string());
-                params.push(Box::new(start_date.clone()));
-            }
-
-            if let Some(end_date) = &f.end_date {
-                conditions.push("payment_date <= ?".to_string());
-                params.push(Box::new(end_date.clone()));
-            }
-
-            if let Some(payment_method) = &f.payment_method {
-                conditions.push("payment_method = ?".to_string());
-                params.push(Box::new(payment_method.as_str().to_string()));
-            }
-
-            if let Some(min_amount) = f.min_amount {
-                conditions.push("amount >= ?".to_string());
-                params.push(Box::new(min_amount));
-            }
-
-            if let Some(max_amount) = f.max_amount {
-                conditions.push("amount <= ?".to_string());
-                params.push(Box::new(max_amount));
-            }
-        }
-
-        if !conditions.is_empty() {
-            query.push_str(" WHERE ");
-            query.push_str(&conditions.join(" AND "));
-        }
+        let (mut query, _, params) = Self::build_payment_query(&filter);
 
         query.push_str(" ORDER BY payment_date DESC, created_at DESC");
 
         let mut stmt = db.connection().prepare(&query)?;
         let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
         
-        let payment_iter = stmt.query_map(&param_refs[..], |row| {
-            let payment_method_str: String = row.get(4)?;
-            Ok(PaymentTransaction {
-                id: row.get(0)?,
-                student_id: row.get(1)?,
-                amount: row.get(2)?,
-                payment_date: row.get(3)?,
-                payment_method: PaymentMethod::from_str(&payment_method_str)
-                    .map_err(|_| rusqlite::Error::InvalidColumnType(4, "payment_method".to_string(), rusqlite::types::Type::Text))?,
-                notes: row.get(5)?,
-                created_at: row.get(6)?,
-            })
-        })?;
+        let payment_iter = stmt.query_map(&param_refs[..], Self::parse_payment_transaction)?;
 
         payment_iter.collect::<Result<Vec<_>, _>>().map_err(DatabaseError::from)
     }
@@ -462,114 +483,101 @@ impl PaymentService {
         Self::get_payment_history(db, Some(filter))
     }
 
-    /// Get comprehensive payment summary using optimized SQL queries
+    /// Get comprehensive payment summary using optimized calculations
     pub fn get_payment_summary(db: &Database) -> DatabaseResult<PaymentSummary> {
-        // Get overall statistics using SQL aggregation
-        let summary_query = r#"
-            SELECT 
-                COUNT(*) as total_students,
-                SUM(paid_amount) as total_paid,
-                SUM(CASE 
-                    WHEN payment_plan = 'one-time' THEN plan_amount
-                    WHEN payment_plan = 'monthly' THEN plan_amount * (
-                        CAST((julianday('now') - julianday(enrollment_date)) / 30.44 AS INTEGER) + 1
-                    )
-                    WHEN payment_plan = 'installment' THEN plan_amount * COALESCE(installment_count, 3)
-                    ELSE plan_amount
-                END) as total_expected,
-                COUNT(CASE WHEN payment_status = 'paid' THEN 1 END) as students_paid,
-                COUNT(CASE WHEN payment_status = 'pending' THEN 1 END) as students_pending,
-                COUNT(CASE WHEN payment_status = 'overdue' THEN 1 END) as students_overdue,
-                COUNT(CASE WHEN payment_status = 'due_soon' THEN 1 END) as students_due_soon
-            FROM students
-        "#;
+        let overall_stats = Self::get_overall_payment_stats(db)?;
+        let plan_breakdown = Self::get_payment_plan_breakdown(db)?;
+        let recent_payments = Self::get_recent_payments(db)?;
 
-        let (total_students, total_paid_amount, total_expected_amount, students_paid, students_pending, students_overdue, students_due_soon) = 
-            db.connection().query_row(summary_query, [], |row| {
-                Ok((
-                    row.get::<_, i32>(0)?,
-                    row.get::<_, Option<i64>>(1)?.unwrap_or(0),
-                    row.get::<_, Option<i64>>(2)?.unwrap_or(0),
-                    row.get::<_, i32>(3)?,
-                    row.get::<_, i32>(4)?,
-                    row.get::<_, i32>(5)?,
-                    row.get::<_, i32>(6)?,
-                ))
-            })?;
+        Ok(PaymentSummary {
+            total_students: overall_stats.0,
+            total_paid_amount: overall_stats.1,
+            total_expected_amount: overall_stats.2,
+            students_paid: overall_stats.3,
+            students_pending: overall_stats.4,
+            students_overdue: overall_stats.5,
+            students_due_soon: overall_stats.6,
+            payment_plan_breakdown: plan_breakdown,
+            recent_payments,
+        })
+    }
 
-        // Get payment plan breakdown using SQL aggregation
-        let plan_breakdown_query = r#"
-            SELECT 
-                payment_plan,
-                COUNT(*) as total_students,
-                SUM(paid_amount) as total_paid,
-                SUM(CASE 
-                    WHEN payment_plan = 'one-time' THEN plan_amount
-                    WHEN payment_plan = 'monthly' THEN plan_amount * (
-                        CAST((julianday('now') - julianday(enrollment_date)) / 30.44 AS INTEGER) + 1
-                    )
-                    WHEN payment_plan = 'installment' THEN plan_amount * COALESCE(installment_count, 3)
-                    ELSE plan_amount
-                END) as total_expected,
-                COUNT(CASE WHEN payment_status = 'paid' THEN 1 END) as students_paid,
-                COUNT(CASE WHEN payment_status = 'pending' THEN 1 END) as students_pending,
-                COUNT(CASE WHEN payment_status = 'overdue' THEN 1 END) as students_overdue,
-                COUNT(CASE WHEN payment_status = 'due_soon' THEN 1 END) as students_due_soon
-            FROM students
-            GROUP BY payment_plan
-        "#;
+    /// Get overall payment statistics
+    fn get_overall_payment_stats(db: &Database) -> DatabaseResult<(i32, i64, i64, i32, i32, i32, i32)> {
+        let students = StudentService::get_all_students(db)?;
+        let mut total_expected = 0i64;
+        let mut total_paid = 0i64;
+        let mut students_paid = 0;
+        let mut students_pending = 0;
+        let mut students_overdue = 0;
+        let mut students_due_soon = 0;
 
-        let mut stmt = db.connection().prepare(plan_breakdown_query)?;
-        let plan_iter = stmt.query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                PaymentPlanStats {
-                    total_students: row.get(1)?,
-                    total_paid: row.get::<_, Option<i64>>(2)?.unwrap_or(0),
-                    total_expected: row.get::<_, Option<i64>>(3)?.unwrap_or(0),
-                    students_paid: row.get(4)?,
-                    students_pending: row.get(5)?,
-                    students_overdue: row.get(6)?,
-                    students_due_soon: row.get(7)?,
-                }
-            ))
-        })?;
+        for student in &students {
+            let expected = Self::calculate_expected_amount(
+                &student.payment_plan,
+                student.plan_amount,
+                &student.enrollment_date,
+                student.installment_count,
+            )?;
+            total_expected += expected;
+            total_paid += student.paid_amount as i64;
 
-        let mut one_time_stats = PaymentPlanStats::default();
-        let mut monthly_stats = PaymentPlanStats::default();
-        let mut installment_stats = PaymentPlanStats::default();
-
-        for plan_result in plan_iter {
-            let (plan_type, stats) = plan_result?;
-            match plan_type.as_str() {
-                "one-time" => one_time_stats = stats,
-                "monthly" => monthly_stats = stats,
-                "installment" => installment_stats = stats,
-                _ => {}
+            match student.payment_status {
+                PaymentStatus::Paid => students_paid += 1,
+                PaymentStatus::Pending => students_pending += 1,
+                PaymentStatus::Overdue => students_overdue += 1,
+                PaymentStatus::DueSoon => students_due_soon += 1,
             }
         }
 
-        // Get recent payments (limited to DEFAULT_RECENT_PAYMENTS_LIMIT)
-        let recent_payments = Self::get_payment_history(db, None)?
-            .into_iter()
-            .take(DEFAULT_RECENT_PAYMENTS_LIMIT)
-            .collect();
-
-        Ok(PaymentSummary {
-            total_students,
-            total_paid_amount,
-            total_expected_amount,
+        Ok((
+            students.len() as i32,
+            total_paid,
+            total_expected,
             students_paid,
             students_pending,
             students_overdue,
             students_due_soon,
-            payment_plan_breakdown: PaymentPlanBreakdown {
-                one_time: one_time_stats,
-                monthly: monthly_stats,
-                installment: installment_stats,
-            },
-            recent_payments,
+        ))
+    }
+
+    /// Get payment plan breakdown statistics
+    fn get_payment_plan_breakdown(db: &Database) -> DatabaseResult<PaymentPlanBreakdown> {
+        let students = StudentService::get_all_students(db)?;
+        let mut one_time_stats = PaymentPlanStats::default();
+        let mut monthly_stats = PaymentPlanStats::default();
+        let mut installment_stats = PaymentPlanStats::default();
+
+        for student in &students {
+            let expected = Self::calculate_expected_amount(
+                &student.payment_plan,
+                student.plan_amount,
+                &student.enrollment_date,
+                student.installment_count,
+            )?;
+
+            let stats = match student.payment_plan {
+                PaymentPlan::OneTime => &mut one_time_stats,
+                PaymentPlan::Monthly => &mut monthly_stats,
+                PaymentPlan::Installment => &mut installment_stats,
+            };
+
+            Self::update_payment_plan_stats(stats, student, expected);
+        }
+
+        Ok(PaymentPlanBreakdown {
+            one_time: one_time_stats,
+            monthly: monthly_stats,
+            installment: installment_stats,
         })
+    }
+
+    /// Get recent payments
+    fn get_recent_payments(db: &Database) -> DatabaseResult<Vec<PaymentTransaction>> {
+        Ok(Self::get_payment_history(db, None)?
+            .into_iter()
+            .take(DEFAULT_RECENT_PAYMENTS_LIMIT)
+            .collect())
     }
 
     /// Update payment status and due dates for a specific student
@@ -655,6 +663,57 @@ impl PaymentService {
         })
     }
 
+    /// Update payment statuses for all students using batch SQL operations (optimized)
+    pub fn update_all_payment_statuses_batch(db: &Database) -> DatabaseResult<BatchUpdateResult> {
+        let config = StudentService::get_payment_plan_config(db)?;
+        
+        let update_query = r#"
+            UPDATE students 
+            SET payment_status = CASE 
+                WHEN paid_amount >= (
+                    CASE payment_plan
+                        WHEN 'one-time' THEN plan_amount
+                        WHEN 'installment' THEN plan_amount * COALESCE(installment_count, ?)
+                        ELSE plan_amount
+                    END
+                ) THEN 'paid'
+                WHEN next_due_date < date('now') THEN 'overdue'
+                WHEN next_due_date <= date('now', '+' || ? || ' days') THEN 'due_soon'
+                ELSE 'pending'
+            END,
+            updated_at = ?
+            WHERE payment_status != CASE 
+                WHEN paid_amount >= (
+                    CASE payment_plan
+                        WHEN 'one-time' THEN plan_amount
+                        WHEN 'installment' THEN plan_amount * COALESCE(installment_count, ?)
+                        ELSE plan_amount
+                    END
+                ) THEN 'paid'
+                WHEN next_due_date < date('now') THEN 'overdue'
+                WHEN next_due_date <= date('now', '+' || ? || ' days') THEN 'due_soon'
+                ELSE 'pending'
+            END
+        "#;
+        
+        let now = Utc::now().to_rfc3339();
+        let rows_affected = db.connection().execute(
+            update_query, 
+            params![
+                DEFAULT_INSTALLMENT_COUNT, 
+                config.reminder_days, 
+                now,
+                DEFAULT_INSTALLMENT_COUNT,
+                config.reminder_days
+            ]
+        )?;
+        
+        Ok(BatchUpdateResult {
+            successful_updates: rows_affected as i32,
+            failed_updates: Vec::new(),
+        })
+    }
+
     /// Delete a payment transaction (with proper rollback of student paid amount)
     pub fn delete_payment(
         db: &Database,
@@ -734,20 +793,7 @@ impl PaymentService {
         Ok(true)
     }
 
-    /// Update payment status within a transaction (for better atomicity)
-    fn update_student_payment_status_in_transaction(
-        tx: &rusqlite::Transaction,
-        student_id: &str,
-    ) -> Result<(), rusqlite::Error> {
-        // This is a simplified version - in a real implementation, you'd want to
-        // calculate the payment status based on the current data in the transaction
-        let now = Utc::now().to_rfc3339();
-        tx.execute(
-            "UPDATE students SET updated_at = ?1 WHERE id = ?2",
-            params![now, student_id],
-        )?;
-        Ok(())
-    }
+
 
     /// Get payment summary for a specific student
     pub fn get_student_payment_summary(
@@ -760,21 +806,13 @@ impl PaymentService {
         // Get payment history for this student
         let payments = Self::get_student_payment_history(db, student_id)?;
         
-        // Calculate expected amount based on payment plan
-        let expected_amount = match student.payment_plan {
-            PaymentPlan::OneTime => student.plan_amount as i64,
-            PaymentPlan::Monthly => {
-                let enrollment_date = NaiveDate::parse_from_str(&student.enrollment_date, "%Y-%m-%d")
-                    .unwrap_or_else(|_| Utc::now().date_naive());
-                let today = Utc::now().date_naive();
-                let months_enrolled = ((today.year() - enrollment_date.year()) * 12 + 
-                                     (today.month() as i32 - enrollment_date.month() as i32)) + 1;
-                (student.plan_amount as i64) * (months_enrolled.max(1) as i64)
-            }
-            PaymentPlan::Installment => {
-                (student.plan_amount as i64) * (student.installment_count.unwrap_or(3) as i64)
-            }
-        };
+        // Calculate expected amount using centralized method
+        let expected_amount = Self::calculate_expected_amount(
+            &student.payment_plan,
+            student.plan_amount,
+            &student.enrollment_date,
+            student.installment_count,
+        )?;
 
         let remaining_amount = (expected_amount - student.paid_amount as i64).max(0);
         let payment_percentage = if expected_amount > 0 {
@@ -827,21 +865,13 @@ impl PaymentService {
             let enrollment_date: String = row.get(6)?;
             let installment_count: Option<i32> = row.get(7)?;
 
-            // Calculate expected amount
-            let expected_amount = match payment_plan {
-                PaymentPlan::OneTime => plan_amount as i64,
-                PaymentPlan::Monthly => {
-                    let enrollment = NaiveDate::parse_from_str(&enrollment_date, "%Y-%m-%d")
-                        .unwrap_or_else(|_| Utc::now().date_naive());
-                    let today = Utc::now().date_naive();
-                    let months_enrolled = ((today.year() - enrollment.year()) * 12 + 
-                                         (today.month() as i32 - enrollment.month() as i32)) + 1;
-                    (plan_amount as i64) * (months_enrolled.max(1) as i64)
-                }
-                PaymentPlan::Installment => {
-                    (plan_amount as i64) * (installment_count.unwrap_or(3) as i64)
-                }
-            };
+            // Calculate expected amount using centralized method
+            let expected_amount = Self::calculate_expected_amount(
+                &payment_plan,
+                plan_amount,
+                &enrollment_date,
+                installment_count,
+            ).unwrap_or(plan_amount as i64);
 
             let overdue_amount = (expected_amount - paid_amount as i64).max(0);
             
