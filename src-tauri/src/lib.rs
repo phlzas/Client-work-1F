@@ -1,12 +1,18 @@
 mod database;
 mod student_service;
 mod attendance_service;
+mod payment_service;
+mod settings_service;
+mod audit_service;
 #[cfg(test)]
 mod database_integration_test;
 
 use database::{Database, AppliedMigration, MigrationValidation, SchemaInfo, Migration, RollbackInfo};
 use student_service::{StudentService, Student, StudentWithAttendance, CreateStudentRequest, UpdateStudentRequest, StudentStatistics, PaymentPlan, PaymentPlanConfig};
 use attendance_service::{AttendanceService, AttendanceRecord, AttendanceStats, DailyAttendanceSummary, AttendanceHistoryFilter};
+use payment_service::{PaymentService, PaymentTransaction, PaymentSummary, PaymentStatistics, RecordPaymentRequest, PaymentHistoryFilter, PaymentMethod};
+use settings_service::{SettingsService, AppSettings, PaymentPlanConfig as SettingsPaymentPlanConfig, SettingRecord};
+use audit_service::{AuditService, AuditLogEntry, AuditLogFilter, AuditStatistics};
 use std::sync::Mutex;
 use tauri::{Manager, State};
 
@@ -187,6 +193,189 @@ async fn format_date(date_str: String) -> Result<String, String> {
     AttendanceService::format_date(&date_str).map_err(|e| format!("Failed to format date: {}", e))
 }
 
+// Payment-related IPC commands
+#[tauri::command]
+async fn record_payment(state: State<'_, AppState>, student_id: String, amount: i32, payment_date: String, payment_method: String, notes: Option<String>) -> Result<PaymentTransaction, String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    let payment_method_enum = PaymentMethod::from_str(&payment_method).map_err(|e| format!("Invalid payment method: {}", e))?;
+    let request = RecordPaymentRequest {
+        student_id,
+        amount,
+        payment_date,
+        payment_method: payment_method_enum,
+        notes,
+    };
+    PaymentService::record_payment(&db, request).map_err(|e| format!("Failed to record payment: {}", e))
+}
+
+#[tauri::command]
+async fn get_payment_history(state: State<'_, AppState>, student_id: Option<String>, start_date: Option<String>, end_date: Option<String>, payment_method: Option<String>, min_amount: Option<i32>, max_amount: Option<i32>) -> Result<Vec<PaymentTransaction>, String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    
+    let payment_method_enum = if let Some(method) = payment_method {
+        Some(PaymentMethod::from_str(&method).map_err(|e| format!("Invalid payment method: {}", e))?)
+    } else {
+        None
+    };
+    
+    let filter = if student_id.is_some() || start_date.is_some() || end_date.is_some() || payment_method_enum.is_some() || min_amount.is_some() || max_amount.is_some() {
+        Some(PaymentHistoryFilter {
+            student_id,
+            start_date,
+            end_date,
+            payment_method: payment_method_enum,
+            min_amount,
+            max_amount,
+        })
+    } else {
+        None
+    };
+    
+    PaymentService::get_payment_history(&db, filter).map_err(|e| format!("Failed to get payment history: {}", e))
+}
+
+#[tauri::command]
+async fn get_student_payment_history(state: State<'_, AppState>, student_id: String) -> Result<Vec<PaymentTransaction>, String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    PaymentService::get_student_payment_history(&db, &student_id).map_err(|e| format!("Failed to get student payment history: {}", e))
+}
+
+#[tauri::command]
+async fn get_payment_summary(state: State<'_, AppState>) -> Result<PaymentSummary, String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    PaymentService::get_payment_summary(&db).map_err(|e| format!("Failed to get payment summary: {}", e))
+}
+
+#[tauri::command]
+async fn update_student_payment_status(state: State<'_, AppState>, student_id: String) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    PaymentService::update_student_payment_status(&db, &student_id).map_err(|e| format!("Failed to update student payment status: {}", e))
+}
+
+#[tauri::command]
+async fn update_all_payment_statuses(state: State<'_, AppState>) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    PaymentService::update_all_payment_statuses(&db).map(|_| ()).map_err(|e| format!("Failed to update all payment statuses: {}", e))
+}
+
+#[tauri::command]
+async fn delete_payment(state: State<'_, AppState>, payment_id: i32) -> Result<bool, String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    PaymentService::delete_payment(&db, payment_id).map_err(|e| format!("Failed to delete payment: {}", e))
+}
+
+#[tauri::command]
+async fn get_payment_statistics(state: State<'_, AppState>, start_date: Option<String>, end_date: Option<String>) -> Result<PaymentStatistics, String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    PaymentService::get_payment_statistics(&db, start_date.as_deref(), end_date.as_deref()).map_err(|e| format!("Failed to get payment statistics: {}", e))
+}
+
+// Settings-related IPC commands
+#[tauri::command]
+async fn get_settings(state: State<'_, AppState>) -> Result<AppSettings, String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    SettingsService::get_settings(&db).map_err(|e| format!("Failed to get settings: {}", e))
+}
+
+#[tauri::command]
+async fn update_settings(state: State<'_, AppState>, settings: AppSettings) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    SettingsService::update_settings(&db, settings).map_err(|e| format!("Failed to update settings: {}", e))
+}
+
+#[tauri::command]
+async fn get_payment_plan_config_settings(state: State<'_, AppState>) -> Result<SettingsPaymentPlanConfig, String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    SettingsService::get_payment_plan_config(&db).map_err(|e| format!("Failed to get payment plan config: {}", e))
+}
+
+#[tauri::command]
+async fn update_payment_plan_config_settings(state: State<'_, AppState>, config: SettingsPaymentPlanConfig) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    SettingsService::update_payment_plan_config(&db, config).map_err(|e| format!("Failed to update payment plan config: {}", e))
+}
+
+#[tauri::command]
+async fn get_setting(state: State<'_, AppState>, key: String) -> Result<Option<String>, String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    SettingsService::get_setting(&db, &key).map_err(|e| format!("Failed to get setting: {}", e))
+}
+
+#[tauri::command]
+async fn set_setting(state: State<'_, AppState>, key: String, value: String) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    SettingsService::set_setting(&db, &key, &value).map_err(|e| format!("Failed to set setting: {}", e))
+}
+
+#[tauri::command]
+async fn get_all_settings(state: State<'_, AppState>) -> Result<Vec<SettingRecord>, String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    SettingsService::get_all_settings(&db).map_err(|e| format!("Failed to get all settings: {}", e))
+}
+
+#[tauri::command]
+async fn delete_setting(state: State<'_, AppState>, key: String) -> Result<bool, String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    SettingsService::delete_setting(&db, &key).map_err(|e| format!("Failed to delete setting: {}", e))
+}
+
+#[tauri::command]
+async fn reset_settings_to_defaults(state: State<'_, AppState>) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    SettingsService::reset_to_defaults(&db).map_err(|e| format!("Failed to reset settings to defaults: {}", e))
+}
+
+#[tauri::command]
+async fn validate_settings(state: State<'_, AppState>) -> Result<bool, String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    SettingsService::validate_settings(&db).map_err(|e| format!("Failed to validate settings: {}", e))
+}
+
+// Audit-related IPC commands
+#[tauri::command]
+async fn get_audit_log(state: State<'_, AppState>, table_name: Option<String>, record_id: Option<String>, action_type: Option<String>, user_id: Option<String>, start_date: Option<String>, end_date: Option<String>) -> Result<Vec<AuditLogEntry>, String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    
+    let filter = if table_name.is_some() || record_id.is_some() || action_type.is_some() || user_id.is_some() || start_date.is_some() || end_date.is_some() {
+        Some(AuditLogFilter {
+            table_name,
+            record_id,
+            action_type,
+            user_id,
+            start_date,
+            end_date,
+        })
+    } else {
+        None
+    };
+    
+    AuditService::get_audit_log(&db, filter).map_err(|e| format!("Failed to get audit log: {}", e))
+}
+
+#[tauri::command]
+async fn get_record_history(state: State<'_, AppState>, table_name: String, record_id: String) -> Result<Vec<AuditLogEntry>, String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    AuditService::get_record_history(&db, &table_name, &record_id).map_err(|e| format!("Failed to get record history: {}", e))
+}
+
+#[tauri::command]
+async fn get_recent_audit_activity(state: State<'_, AppState>) -> Result<Vec<AuditLogEntry>, String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    AuditService::get_recent_activity(&db).map_err(|e| format!("Failed to get recent audit activity: {}", e))
+}
+
+#[tauri::command]
+async fn get_audit_statistics(state: State<'_, AppState>) -> Result<AuditStatistics, String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    AuditService::get_audit_statistics(&db).map_err(|e| format!("Failed to get audit statistics: {}", e))
+}
+
+#[tauri::command]
+async fn cleanup_old_audit_entries(state: State<'_, AppState>, days_to_keep: i32) -> Result<i32, String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    AuditService::cleanup_old_entries(&db, days_to_keep).map_err(|e| format!("Failed to cleanup old audit entries: {}", e))
+}
+
 // Migration-related IPC commands
 #[tauri::command]
 async fn get_migration_history(state: State<'_, AppState>) -> Result<Vec<AppliedMigration>, String> {
@@ -303,6 +492,32 @@ pub fn run() {
       delete_attendance,
       get_current_date,
       format_date,
+      // Payment commands
+      record_payment,
+      get_payment_history,
+      get_student_payment_history,
+      get_payment_summary,
+      update_student_payment_status,
+      update_all_payment_statuses,
+      delete_payment,
+      get_payment_statistics,
+      // Settings commands
+      get_settings,
+      update_settings,
+      get_payment_plan_config_settings,
+      update_payment_plan_config_settings,
+      get_setting,
+      set_setting,
+      get_all_settings,
+      delete_setting,
+      reset_settings_to_defaults,
+      validate_settings,
+      // Audit commands
+      get_audit_log,
+      get_record_history,
+      get_recent_audit_activity,
+      get_audit_statistics,
+      cleanup_old_audit_entries,
       // Migration commands
       get_migration_history,
       get_schema_info,

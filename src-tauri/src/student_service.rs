@@ -1,4 +1,5 @@
 use crate::database::{Database, DatabaseError, DatabaseResult};
+use crate::audit_service::AuditService;
 use chrono::{Utc, NaiveDate, Datelike};
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
@@ -449,9 +450,9 @@ impl StudentService {
             ],
         )?;
 
-        // Return the created student
-        Ok(Student {
-            id: student_id,
+        // Create the student object to return
+        let created_student = Student {
+            id: student_id.clone(),
             name: request.name.trim().to_string(),
             group_name: request.group_name.trim().to_string(),
             payment_plan: request.payment_plan,
@@ -463,7 +464,14 @@ impl StudentService {
             payment_status,
             created_at: now.clone(),
             updated_at: now,
-        })
+        };
+
+        // Log audit entry for student creation
+        if let Ok(serialized_data) = AuditService::serialize_data(&created_student) {
+            let _ = AuditService::log_create(db, "students", &student_id, &serialized_data, None);
+        }
+
+        Ok(created_student)
     }
 
     /// Get all students
@@ -634,7 +642,7 @@ impl StudentService {
                 config.installment_interval,
             )?
         } else {
-            current_student.next_due_date
+            current_student.next_due_date.clone()
         };
 
         // Recalculate payment status
@@ -647,6 +655,14 @@ impl StudentService {
             &current_student.enrollment_date,
             config.reminder_days,
         )?;
+
+        // Serialize old data for audit log
+        let old_data = AuditService::serialize_data(&current_student).ok();
+
+        // Store values we need after the move
+        let paid_amount = current_student.paid_amount;
+        let enrollment_date = current_student.enrollment_date.clone();
+        let created_at = current_student.created_at.clone();
 
         // Update student in database
         let now = Utc::now().to_rfc3339();
@@ -674,18 +690,38 @@ impl StudentService {
             )));
         }
 
+        // Create updated student object for audit log
+        let updated_student = Student {
+            id: student_id.to_string(),
+            name: request.name.trim().to_string(),
+            group_name: request.group_name.trim().to_string(),
+            payment_plan: request.payment_plan,
+            plan_amount: request.plan_amount,
+            installment_count: request.installment_count,
+            paid_amount,
+            enrollment_date,
+            next_due_date,
+            payment_status,
+            created_at,
+            updated_at: now,
+        };
+
+        // Log audit entry for student update
+        if let (Some(old_data), Ok(new_data)) = (old_data, AuditService::serialize_data(&updated_student)) {
+            let _ = AuditService::log_update(db, "students", student_id, &old_data, &new_data, None);
+        }
+
         Ok(())
     }
 
     /// Delete a student
     pub fn delete_student(db: &Database, student_id: &str) -> DatabaseResult<()> {
-        // Check if student exists
-        if Self::get_student_by_id(db, student_id)?.is_none() {
-            return Err(DatabaseError::Migration(format!(
-                "Student with ID {} not found",
-                student_id
-            )));
-        }
+        // Check if student exists and get current data for audit log
+        let current_student = Self::get_student_by_id(db, student_id)?
+            .ok_or_else(|| DatabaseError::Migration(format!("Student with ID {} not found", student_id)))?;
+
+        // Serialize student data for audit log
+        let old_data = AuditService::serialize_data(&current_student).ok();
 
         // Delete student (attendance records will be deleted automatically due to foreign key constraint)
         let rows_affected = db.connection().execute(
@@ -698,6 +734,11 @@ impl StudentService {
                 "Failed to delete student with ID {}",
                 student_id
             )));
+        }
+
+        // Log audit entry for student deletion
+        if let Some(old_data) = old_data {
+            let _ = AuditService::log_delete(db, "students", student_id, &old_data, None);
         }
 
         Ok(())

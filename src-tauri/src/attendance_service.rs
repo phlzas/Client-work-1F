@@ -1,4 +1,5 @@
 use crate::database::{Database, DatabaseResult};
+use crate::audit_service::AuditService;
 use chrono::{DateTime, Utc, NaiveDate, Local};
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
@@ -87,6 +88,11 @@ impl AttendanceService {
             }
         ).map_err(|e| crate::database::DatabaseError::Sqlite(e))?;
         
+        // Log audit entry for attendance creation
+        if let Ok(serialized_data) = AuditService::serialize_data(&attendance_record) {
+            let _ = AuditService::log_create(db, "attendance", &attendance_record.id.to_string(), &serialized_data, None);
+        }
+
         log::info!("Marked attendance for student '{}' on date '{}'", student_id, date);
         Ok(attendance_record)
     }
@@ -342,12 +348,33 @@ impl AttendanceService {
     pub fn delete_attendance(db: &Database, student_id: &str, date: &str) -> DatabaseResult<bool> {
         Self::validate_date_format(date)?;
         
+        // Get the attendance record before deleting for audit log
+        let attendance_record = db.connection().query_row(
+            "SELECT id, student_id, date, created_at FROM attendance WHERE student_id = ?1 AND date = ?2",
+            params![student_id, date],
+            |row| {
+                Ok(AttendanceRecord {
+                    id: row.get(0)?,
+                    student_id: row.get(1)?,
+                    date: row.get(2)?,
+                    created_at: row.get(3)?,
+                })
+            }
+        ).ok();
+        
         let rows_affected = db.connection().execute(
             "DELETE FROM attendance WHERE student_id = ?1 AND date = ?2",
             params![student_id, date],
         ).map_err(|e| crate::database::DatabaseError::Sqlite(e))?;
         
         if rows_affected > 0 {
+            // Log audit entry for attendance deletion
+            if let Some(record) = attendance_record {
+                if let Ok(serialized_data) = AuditService::serialize_data(&record) {
+                    let _ = AuditService::log_delete(db, "attendance", &record.id.to_string(), &serialized_data, None);
+                }
+            }
+            
             log::info!("Deleted attendance record for student '{}' on date '{}'", student_id, date);
             Ok(true)
         } else {
