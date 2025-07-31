@@ -213,6 +213,48 @@ impl Database {
                     ('reminder_days', '7')".to_string(),
                 applied_at: None,
             },
+            Migration {
+                version: 8,
+                description: "Create groups table for dynamic group management".to_string(),
+                sql: "CREATE TABLE groups (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT UNIQUE NOT NULL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )".to_string(),
+                applied_at: None,
+            },
+            Migration {
+                version: 9,
+                description: "Insert default groups".to_string(),
+                sql: "INSERT OR IGNORE INTO groups (name) VALUES 
+                    ('Group A'),
+                    ('Group B'),
+                    ('Group C')".to_string(),
+                applied_at: None,
+            },
+            Migration {
+                version: 10,
+                description: "Create payment_settings table for configurable payment plans".to_string(),
+                sql: "CREATE TABLE payment_settings (
+                    id INTEGER PRIMARY KEY,
+                    one_time_amount INTEGER NOT NULL DEFAULT 6000,
+                    monthly_amount INTEGER NOT NULL DEFAULT 850,
+                    installment_amount INTEGER NOT NULL DEFAULT 2850,
+                    installment_interval_months INTEGER NOT NULL DEFAULT 3,
+                    reminder_days INTEGER NOT NULL DEFAULT 7,
+                    payment_threshold INTEGER NOT NULL DEFAULT 6000,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )".to_string(),
+                applied_at: None,
+            },
+            Migration {
+                version: 11,
+                description: "Insert default payment settings".to_string(),
+                sql: "INSERT OR IGNORE INTO payment_settings (id, one_time_amount, monthly_amount, installment_amount, installment_interval_months, reminder_days, payment_threshold) VALUES 
+                    (1, 6000, 850, 2850, 3, 7, 6000)".to_string(),
+                applied_at: None,
+            },
         ]
     }
     
@@ -288,6 +330,14 @@ impl Database {
             "CREATE INDEX IF NOT EXISTS idx_users_last_login ON users(last_login)",  // Activity tracking
             "CREATE INDEX IF NOT EXISTS idx_users_created_at ON users(created_at)",  // User registration tracking
             
+            // Groups table indexes - optimized for group management
+            "CREATE INDEX IF NOT EXISTS idx_groups_name ON groups(name)",  // Group name lookups (already unique)
+            "CREATE INDEX IF NOT EXISTS idx_groups_created_at ON groups(created_at)",  // Creation date queries
+            "CREATE INDEX IF NOT EXISTS idx_groups_updated_at ON groups(updated_at)",  // Recently modified groups
+            
+            // Payment settings table indexes - optimized for settings management
+            "CREATE INDEX IF NOT EXISTS idx_payment_settings_updated_at ON payment_settings(updated_at)",  // Recently modified settings
+            
             // Migrations table index - for migration management
             "CREATE INDEX IF NOT EXISTS idx_migrations_version ON migrations(version)",  // Version lookups
             "CREATE INDEX IF NOT EXISTS idx_migrations_applied_at ON migrations(applied_at)",  // Migration history
@@ -321,6 +371,8 @@ impl Database {
             "audit_log",
             "settings",
             "users",
+            "groups",
+            "payment_settings",
             "migrations"
         ];
         

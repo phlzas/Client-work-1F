@@ -4,6 +4,8 @@ mod attendance_service;
 mod payment_service;
 mod settings_service;
 mod audit_service;
+mod groups_service;
+mod payment_settings_service;
 #[cfg(test)]
 mod database_integration_test;
 
@@ -13,6 +15,8 @@ use attendance_service::{AttendanceService, AttendanceRecord, AttendanceStats, D
 use payment_service::{PaymentService, PaymentTransaction, PaymentSummary, PaymentStatistics, RecordPaymentRequest, PaymentHistoryFilter, PaymentMethod};
 use settings_service::{SettingsService, AppSettings, PaymentPlanConfig as SettingsPaymentPlanConfig, SettingRecord};
 use audit_service::{AuditService, AuditLogEntry, AuditLogFilter, AuditStatistics};
+use groups_service::{GroupsService, Group, GroupWithStudentCount, CreateGroupRequest, UpdateGroupRequest, GroupStatistics};
+use payment_settings_service::{PaymentSettingsService, PaymentSettings, UpdatePaymentSettingsRequest, PaymentConfig, PaymentSettingsHistoryEntry};
 use std::sync::Mutex;
 use tauri::{Manager, State};
 
@@ -376,6 +380,148 @@ async fn cleanup_old_audit_entries(state: State<'_, AppState>, days_to_keep: i32
     AuditService::cleanup_old_entries(&db, days_to_keep).map_err(|e| format!("Failed to cleanup old audit entries: {}", e))
 }
 
+// Groups-related IPC commands
+#[tauri::command]
+async fn get_all_groups(state: State<'_, AppState>) -> Result<Vec<Group>, String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    GroupsService::get_all_groups(&db).map_err(|e| format!("Failed to get all groups: {}", e))
+}
+
+#[tauri::command]
+async fn get_all_groups_with_counts(state: State<'_, AppState>) -> Result<Vec<GroupWithStudentCount>, String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    GroupsService::get_all_groups_with_counts(&db).map_err(|e| format!("Failed to get groups with counts: {}", e))
+}
+
+#[tauri::command]
+async fn get_group_by_id(state: State<'_, AppState>, id: i32) -> Result<Option<Group>, String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    GroupsService::get_group_by_id(&db, id).map_err(|e| format!("Failed to get group by ID: {}", e))
+}
+
+#[tauri::command]
+async fn get_group_by_name(state: State<'_, AppState>, name: String) -> Result<Option<Group>, String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    GroupsService::get_group_by_name(&db, &name).map_err(|e| format!("Failed to get group by name: {}", e))
+}
+
+#[tauri::command]
+async fn add_group(state: State<'_, AppState>, name: String) -> Result<Group, String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    
+    // Validate group name
+    GroupsService::validate_group_name(&name).map_err(|e| format!("Invalid group name: {}", e))?;
+    
+    let request = CreateGroupRequest { name };
+    GroupsService::create_group(&db, request).map_err(|e| format!("Failed to create group: {}", e))
+}
+
+#[tauri::command]
+async fn update_group(state: State<'_, AppState>, id: i32, name: String) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    
+    // Validate group name
+    GroupsService::validate_group_name(&name).map_err(|e| format!("Invalid group name: {}", e))?;
+    
+    let request = UpdateGroupRequest { name };
+    GroupsService::update_group(&db, id, request).map_err(|e| format!("Failed to update group: {}", e))
+}
+
+#[tauri::command]
+async fn delete_group(state: State<'_, AppState>, id: i32) -> Result<bool, String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    GroupsService::delete_group(&db, id).map_err(|e| format!("Failed to delete group: {}", e))
+}
+
+#[tauri::command]
+async fn force_delete_group_with_reassignment(state: State<'_, AppState>, id: i32, default_group_name: String) -> Result<bool, String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    GroupsService::force_delete_group_with_reassignment(&db, id, &default_group_name).map_err(|e| format!("Failed to force delete group: {}", e))
+}
+
+#[tauri::command]
+async fn get_students_count_by_group_id(state: State<'_, AppState>, group_id: i32) -> Result<i32, String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    GroupsService::get_students_count_by_group_id(&db, group_id).map_err(|e| format!("Failed to get students count: {}", e))
+}
+
+#[tauri::command]
+async fn get_students_count_by_group_name(state: State<'_, AppState>, group_name: String) -> Result<i32, String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    GroupsService::get_students_count_by_group_name(&db, &group_name).map_err(|e| format!("Failed to get students count: {}", e))
+}
+
+#[tauri::command]
+async fn ensure_default_groups_exist(state: State<'_, AppState>) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    GroupsService::ensure_default_groups_exist(&db).map_err(|e| format!("Failed to ensure default groups exist: {}", e))
+}
+
+#[tauri::command]
+async fn get_group_statistics(state: State<'_, AppState>) -> Result<GroupStatistics, String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    GroupsService::get_group_statistics(&db).map_err(|e| format!("Failed to get group statistics: {}", e))
+}
+
+#[tauri::command]
+async fn validate_group_name(name: String) -> Result<(), String> {
+    GroupsService::validate_group_name(&name)
+}
+
+// Payment Settings-related IPC commands
+#[tauri::command]
+async fn get_payment_settings(state: State<'_, AppState>) -> Result<PaymentSettings, String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    PaymentSettingsService::get_payment_settings(&db).map_err(|e| format!("Failed to get payment settings: {}", e))
+}
+
+#[tauri::command]
+async fn update_payment_settings(state: State<'_, AppState>, settings: UpdatePaymentSettingsRequest) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    PaymentSettingsService::update_payment_settings(&db, settings).map_err(|e| format!("Failed to update payment settings: {}", e))
+}
+
+#[tauri::command]
+async fn reset_payment_settings_to_defaults(state: State<'_, AppState>) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    PaymentSettingsService::reset_to_defaults(&db).map_err(|e| format!("Failed to reset payment settings: {}", e))
+}
+
+#[tauri::command]
+async fn get_payment_config(state: State<'_, AppState>) -> Result<PaymentConfig, String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    PaymentSettingsService::get_payment_config(&db).map_err(|e| format!("Failed to get payment config: {}", e))
+}
+
+#[tauri::command]
+async fn get_payment_settings_history(state: State<'_, AppState>) -> Result<Vec<PaymentSettingsHistoryEntry>, String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    PaymentSettingsService::get_settings_history(&db).map_err(|e| format!("Failed to get payment settings history: {}", e))
+}
+
+#[tauri::command]
+async fn ensure_payment_settings_exist(state: State<'_, AppState>) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    PaymentSettingsService::ensure_settings_exist(&db).map_err(|e| format!("Failed to ensure payment settings exist: {}", e))
+}
+
+#[tauri::command]
+async fn get_amount_for_plan(state: State<'_, AppState>, plan_type: String) -> Result<i32, String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    PaymentSettingsService::get_amount_for_plan(&db, &plan_type).map_err(|e| format!("Failed to get amount for plan: {}", e))
+}
+
+#[tauri::command]
+async fn update_specific_payment_setting(state: State<'_, AppState>, setting_name: String, value: i32) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    PaymentSettingsService::update_specific_setting(&db, &setting_name, value).map_err(|e| format!("Failed to update specific setting: {}", e))
+}
+
+#[tauri::command]
+async fn validate_payment_settings_request(settings: UpdatePaymentSettingsRequest) -> Result<(), String> {
+    PaymentSettingsService::validate_payment_settings(&settings).map_err(|e| format!("Invalid payment settings: {}", e))
+}
+
 // Migration-related IPC commands
 #[tauri::command]
 async fn get_migration_history(state: State<'_, AppState>) -> Result<Vec<AppliedMigration>, String> {
@@ -518,6 +664,30 @@ pub fn run() {
       get_recent_audit_activity,
       get_audit_statistics,
       cleanup_old_audit_entries,
+      // Groups commands
+      get_all_groups,
+      get_all_groups_with_counts,
+      get_group_by_id,
+      get_group_by_name,
+      add_group,
+      update_group,
+      delete_group,
+      force_delete_group_with_reassignment,
+      get_students_count_by_group_id,
+      get_students_count_by_group_name,
+      ensure_default_groups_exist,
+      get_group_statistics,
+      validate_group_name,
+      // Payment Settings commands
+      get_payment_settings,
+      update_payment_settings,
+      reset_payment_settings_to_defaults,
+      get_payment_config,
+      get_payment_settings_history,
+      ensure_payment_settings_exist,
+      get_amount_for_plan,
+      update_specific_payment_setting,
+      validate_payment_settings_request,
       // Migration commands
       get_migration_history,
       get_schema_info,

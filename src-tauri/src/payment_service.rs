@@ -1027,12 +1027,6 @@ pub struct PaymentMethodStats {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BatchUpdateResult {
-    pub successful_updates: i32,
-    pub failed_updates: Vec<(String, String)>, // (student_id, error_message)
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StudentPaymentSummary {
     pub student_id: String,
     pub student_name: String,
