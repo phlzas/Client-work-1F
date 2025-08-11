@@ -4,6 +4,9 @@ import type {
   AttendanceRecord,
   PaymentTransaction,
   AppSettings,
+  QRCodeData,
+  QRCodeBatch,
+  QRCodeStatistics,
 } from "@/types";
 
 // Note: Backend uses snake_case, frontend types handle both snake_case and camelCase for compatibility
@@ -70,6 +73,19 @@ export class ApiError extends Error {
 }
 
 /**
+ * Result type for better error handling
+ */
+type ApiResult<T> =
+  | {
+      success: true;
+      data: T;
+    }
+  | {
+      success: false;
+      error: ApiError;
+    };
+
+/**
  * API service for communicating with the Tauri backend
  * This service provides type-safe methods for all backend operations
  */
@@ -124,6 +140,15 @@ export class ApiService {
       GET_SINGLE: "get_setting",
       SET_SINGLE: "set_setting",
       RESET_TO_DEFAULTS: "reset_settings_to_defaults",
+    },
+
+    // Export domain
+    EXPORT: {
+      ATTENDANCE_CSV: "export_attendance_csv",
+      PAYMENT_SUMMARY_CSV: "export_payment_summary_csv",
+      PAYMENT_HISTORY_CSV: "export_payment_history_csv",
+      OVERDUE_STUDENTS_CSV: "export_overdue_students_csv",
+      VALIDATE_PATH: "validate_export_path",
     },
 
     // Utility domain
@@ -304,7 +329,11 @@ export class ApiService {
   }
   // Student-related methods
   static async getAllStudents(): Promise<Student[]> {
-    return await this.safeInvoke<Student[]>(this.COMMANDS.STUDENT.GET_ALL);
+    return await this.safeInvoke<Student[]>(
+      this.COMMANDS.STUDENT.GET_ALL,
+      undefined,
+      { deduplicate: true }
+    );
   }
 
   static async getStudentById(id: string): Promise<Student | null> {
@@ -322,7 +351,9 @@ export class ApiService {
     groupName: string,
     paymentPlan: "one-time" | "monthly" | "installment",
     planAmount: number,
-    installmentCount?: number
+    installmentCount?: number,
+    paidAmount?: number,
+    enrollmentDate?: string
   ): Promise<Student> {
     this.validateStudentData(
       name,
@@ -335,12 +366,15 @@ export class ApiService {
 
     const params = {
       name: this.sanitizeString(name),
-      group_name: this.sanitizeString(groupName),
-      payment_plan: paymentPlan,
-      plan_amount: planAmount,
-      installment_count: installmentCount,
+      groupName: this.sanitizeString(groupName),
+      paymentPlan: paymentPlan,
+      planAmount: planAmount,
+      installmentCount: installmentCount,
+      paidAmount: paidAmount,
+      enrollmentDate: enrollmentDate,
     };
 
+    console.log("API: Sending addStudent params:", params);
     return await this.safeInvoke<Student>(this.COMMANDS.STUDENT.ADD, params);
   }
 
@@ -350,7 +384,9 @@ export class ApiService {
     groupName: string,
     paymentPlan: "one-time" | "monthly" | "installment",
     planAmount: number,
-    installmentCount?: number
+    installmentCount?: number,
+    paidAmount?: number,
+    enrollmentDate?: string
   ): Promise<void> {
     if (!id?.trim()) {
       throw new ApiError("Student ID is required", "updateStudent");
@@ -369,10 +405,12 @@ export class ApiService {
     return await this.safeInvoke<void>(this.COMMANDS.STUDENT.UPDATE, {
       id: id.trim(),
       name: this.sanitizeString(name),
-      group_name: this.sanitizeString(groupName),
-      payment_plan: paymentPlan,
-      plan_amount: planAmount,
-      installment_count: installmentCount,
+      groupName: this.sanitizeString(groupName),
+      paymentPlan: paymentPlan,
+      planAmount: planAmount,
+      installmentCount: installmentCount,
+      paidAmount: paidAmount,
+      enrollmentDate: enrollmentDate,
     });
   }
 
@@ -392,7 +430,7 @@ export class ApiService {
     return await this.safeInvoke<Student[]>(
       this.COMMANDS.STUDENT.GET_BY_GROUP,
       {
-        group_name: groupName.trim(),
+        groupName: groupName.trim(),
       }
     );
   }
@@ -404,21 +442,26 @@ export class ApiService {
         "getStudentsByPaymentStatus"
       );
     }
-    return await this.safeInvoke<Student[]>("get_students_by_payment_status", {
-      status: status.trim(),
-    });
+    return await this.safeInvoke<Student[]>(
+      this.COMMANDS.STUDENT.GET_BY_PAYMENT_STATUS,
+      {
+        status: status.trim(),
+      }
+    );
   }
 
   static async getOverdueStudents(): Promise<Student[]> {
-    return await this.safeInvoke<Student[]>("get_overdue_students");
+    return await this.safeInvoke<Student[]>(this.COMMANDS.STUDENT.GET_OVERDUE);
   }
 
   static async getDueSoonStudents(): Promise<Student[]> {
-    return await this.safeInvoke<Student[]>("get_due_soon_students");
+    return await this.safeInvoke<Student[]>(this.COMMANDS.STUDENT.GET_DUE_SOON);
   }
 
   static async updatePaymentStatuses(): Promise<void> {
-    return await this.safeInvoke<void>("update_payment_statuses");
+    return await this.safeInvoke<void>(
+      this.COMMANDS.STUDENT.UPDATE_PAYMENT_STATUSES
+    );
   }
 
   static async getStudentStatistics(): Promise<StudentStatistics> {
@@ -439,7 +482,7 @@ export class ApiService {
     return await this.safeInvoke<AttendanceRecord>(
       this.COMMANDS.ATTENDANCE.MARK,
       {
-        student_id: studentId.trim(),
+        studentId: studentId.trim(),
         date: attendanceDate,
       }
     );
@@ -450,7 +493,7 @@ export class ApiService {
       throw new ApiError("Student ID is required", "checkAttendanceToday");
     }
     return await this.safeInvoke<boolean>("check_attendance_today", {
-      student_id: studentId.trim(),
+      studentId: studentId.trim(),
     });
   }
 
@@ -465,7 +508,7 @@ export class ApiService {
       throw new ApiError("Date is required", "checkAttendanceOnDate");
     }
     return await this.safeInvoke<boolean>("check_attendance_on_date", {
-      student_id: studentId.trim(),
+      studentId: studentId.trim(),
       date: date.trim(),
     });
   }
@@ -477,10 +520,10 @@ export class ApiService {
     groupName?: string
   ): Promise<AttendanceRecord[]> {
     return await this.safeInvoke<AttendanceRecord[]>("get_attendance_history", {
-      student_id: studentId?.trim(),
-      start_date: startDate?.trim(),
-      end_date: endDate?.trim(),
-      group_name: groupName?.trim(),
+      studentId: studentId?.trim(),
+      startDate: startDate?.trim(),
+      endDate: endDate?.trim(),
+      groupName: groupName?.trim(),
     });
   }
 
@@ -496,7 +539,7 @@ export class ApiService {
     return await this.safeInvoke<AttendanceRecord[]>(
       "get_student_attendance_history",
       {
-        student_id: studentId.trim(),
+        studentId: studentId.trim(),
       }
     );
   }
@@ -510,9 +553,9 @@ export class ApiService {
       throw new ApiError("Student ID is required", "getStudentAttendanceStats");
     }
     return await this.safeInvoke("get_student_attendance_stats", {
-      student_id: studentId.trim(),
-      start_date: startDate?.trim(),
-      end_date: endDate?.trim(),
+      studentId: studentId.trim(),
+      startDate: startDate?.trim(),
+      endDate: endDate?.trim(),
     });
   }
 
@@ -531,7 +574,7 @@ export class ApiService {
     }
     return await this.safeInvoke("get_daily_attendance_summary", {
       date: date.trim(),
-      group_name: groupName?.trim(),
+      groupName: groupName?.trim(),
     });
   }
 
@@ -546,7 +589,7 @@ export class ApiService {
       throw new ApiError("Date is required", "deleteAttendance");
     }
     return await this.safeInvoke<boolean>("delete_attendance", {
-      student_id: studentId.trim(),
+      studentId: studentId.trim(),
       date: date.trim(),
     });
   }
@@ -575,10 +618,10 @@ export class ApiService {
       throw new ApiError("Payment date is required", "recordPayment");
     }
     return await this.safeInvoke<PaymentTransaction>("record_payment", {
-      student_id: studentId.trim(),
+      studentId: studentId.trim(),
       amount,
-      payment_date: paymentDate.trim(),
-      payment_method: paymentMethod,
+      paymentDate: paymentDate.trim(),
+      paymentMethod: paymentMethod,
       notes: notes?.trim(),
     });
   }
@@ -592,12 +635,12 @@ export class ApiService {
     maxAmount?: number
   ): Promise<PaymentTransaction[]> {
     return await this.safeInvoke<PaymentTransaction[]>("get_payment_history", {
-      student_id: studentId?.trim(),
-      start_date: startDate?.trim(),
-      end_date: endDate?.trim(),
-      payment_method: paymentMethod?.trim(),
-      min_amount: minAmount,
-      max_amount: maxAmount,
+      studentId: studentId?.trim(),
+      startDate: startDate?.trim(),
+      endDate: endDate?.trim(),
+      paymentMethod: paymentMethod?.trim(),
+      minAmount: minAmount,
+      maxAmount: maxAmount,
     });
   }
 
@@ -610,7 +653,7 @@ export class ApiService {
     return await this.safeInvoke<PaymentTransaction[]>(
       "get_student_payment_history",
       {
-        student_id: studentId.trim(),
+        studentId: studentId.trim(),
       }
     );
   }
@@ -641,7 +684,7 @@ export class ApiService {
       );
     }
     return await this.safeInvoke<void>("update_student_payment_status", {
-      student_id: studentId.trim(),
+      studentId: studentId.trim(),
     });
   }
 
@@ -784,8 +827,33 @@ export class ApiService {
       );
     }
     return await this.safeInvoke<number>("get_students_count_by_group_id", {
-      group_id: groupId,
+      groupId: groupId,
     });
+  }
+
+  static async forceDeleteGroupWithReassignment(
+    groupId: number,
+    defaultGroupName: string
+  ): Promise<boolean> {
+    if (!groupId || groupId <= 0) {
+      throw new ApiError(
+        "Valid group ID is required",
+        "forceDeleteGroupWithReassignment"
+      );
+    }
+    if (!defaultGroupName?.trim()) {
+      throw new ApiError(
+        "Default group name is required",
+        "forceDeleteGroupWithReassignment"
+      );
+    }
+    return await this.safeInvoke<boolean>(
+      "force_delete_group_with_reassignment",
+      {
+        id: groupId,
+        default_group_name: defaultGroupName.trim(),
+      }
+    );
   }
 
   // Payment Settings-related methods
@@ -951,47 +1019,20 @@ export class ApiService {
       "Payment Status",
       "Next Due Date",
       "Enrollment Date",
-      "Attendance Count",
+      "Created At",
     ];
 
     const rows = students.map((student) => [
       student.id,
       student.name,
-      this.getStudentProperty(student, "group_name", "group", ""),
-      this.getStudentProperty(
-        student,
-        "payment_plan",
-        "paymentPlan",
-        "one-time"
-      ),
-      this.getStudentProperty(
-        student,
-        "plan_amount",
-        "planAmount",
-        0
-      ).toString(),
-      this.getStudentProperty(
-        student,
-        "paid_amount",
-        "paidAmount",
-        0
-      ).toString(),
-      this.getStudentProperty(
-        student,
-        "payment_status",
-        "paymentStatus",
-        "pending"
-      ),
-      this.getStudentProperty(student, "next_due_date", "nextDueDate", "N/A"),
-      this.getStudentProperty(student, "enrollment_date", "enrollmentDate", ""),
-      (
-        this.getStudentProperty(
-          student,
-          "attendance_log",
-          "attendanceLog",
-          []
-        ) as any[]
-      ).length.toString(),
+      student.group_name,
+      student.payment_plan,
+      student.plan_amount.toString(),
+      student.paid_amount.toString(),
+      student.payment_status,
+      student.next_due_date || "N/A",
+      student.enrollment_date,
+      student.created_at,
     ]);
 
     return [headers, ...rows]
@@ -1056,4 +1097,158 @@ export class ApiService {
     }
     return stringField;
   }
+
+  // Export-related methods
+  static async exportAttendanceCSV(
+    filePath: string,
+    startDate?: string,
+    endDate?: string,
+    groupName?: string
+  ): Promise<void> {
+    if (!filePath?.trim()) {
+      throw new ApiError("File path is required", "exportAttendanceCSV");
+    }
+    return await this.safeInvoke<void>(this.COMMANDS.EXPORT.ATTENDANCE_CSV, {
+      filePath: filePath.trim(),
+      startDate: startDate?.trim(),
+      endDate: endDate?.trim(),
+      groupName: groupName?.trim(),
+    });
+  }
+
+  static async exportPaymentSummaryCSV(
+    filePath: string,
+    groupName?: string
+  ): Promise<void> {
+    if (!filePath?.trim()) {
+      throw new ApiError("File path is required", "exportPaymentSummaryCSV");
+    }
+    return await this.safeInvoke<void>(
+      this.COMMANDS.EXPORT.PAYMENT_SUMMARY_CSV,
+      {
+        filePath: filePath.trim(),
+        groupName: groupName?.trim(),
+      }
+    );
+  }
+
+  static async exportPaymentHistoryCSV(
+    filePath: string,
+    studentId?: string,
+    startDate?: string,
+    endDate?: string
+  ): Promise<void> {
+    if (!filePath?.trim()) {
+      throw new ApiError("File path is required", "exportPaymentHistoryCSV");
+    }
+    return await this.safeInvoke<void>(
+      this.COMMANDS.EXPORT.PAYMENT_HISTORY_CSV,
+      {
+        filePath: filePath.trim(),
+        studentId: studentId?.trim(),
+        startDate: startDate?.trim(),
+        endDate: endDate?.trim(),
+      }
+    );
+  }
+
+  static async exportOverdueStudentsCSV(
+    filePath: string,
+    groupName?: string
+  ): Promise<void> {
+    if (!filePath?.trim()) {
+      throw new ApiError("File path is required", "exportOverdueStudentsCSV");
+    }
+    return await this.safeInvoke<void>(
+      this.COMMANDS.EXPORT.OVERDUE_STUDENTS_CSV,
+      {
+        filePath: filePath.trim(),
+        groupName: groupName?.trim(),
+      }
+    );
+  }
+
+  static async validateExportPath(filePath: string): Promise<void> {
+    if (!filePath?.trim()) {
+      throw new ApiError("File path is required", "validateExportPath");
+    }
+    return await this.safeInvoke<void>(this.COMMANDS.EXPORT.VALIDATE_PATH, {
+      filePath: filePath.trim(),
+    });
+  }
 }
+// QR Code API functions
+export const qrCodeApi = {
+  /**
+   * Generate QR code for a specific student ID
+   */
+  generateQRCodeForStudentId: async (studentId: string): Promise<string> => {
+    return await invoke("generate_qr_code_for_student_id", { studentId });
+  },
+
+  /**
+   * Generate QR code data for a specific student
+   */
+  generateQRCodeForStudent: async (studentId: string): Promise<QRCodeData> => {
+    return await invoke("generate_qr_code_for_student", { studentId });
+  },
+
+  /**
+   * Generate QR codes for all students
+   */
+  generateQRCodesForAllStudents: async (): Promise<QRCodeData[]> => {
+    return await invoke("generate_qr_codes_for_all_students");
+  },
+
+  /**
+   * Generate QR codes grouped by group
+   */
+  generateQRCodesByGroup: async (): Promise<QRCodeBatch[]> => {
+    return await invoke("generate_qr_codes_by_group");
+  },
+
+  /**
+   * Generate QR codes for a specific group
+   */
+  generateQRCodesForGroup: async (groupName: string): Promise<QRCodeBatch> => {
+    return await invoke("generate_qr_codes_for_group", { groupName });
+  },
+
+  /**
+   * Export QR codes to PDF
+   */
+  exportQRCodesToPDF: async (
+    qrCodes: QRCodeData[],
+    filePath: string,
+    title?: string
+  ): Promise<void> => {
+    return await invoke("export_qr_codes_to_pdf", { qrCodes, filePath, title });
+  },
+
+  /**
+   * Export QR codes by group to PDF
+   */
+  exportQRCodesByGroupToPDF: async (
+    filePath: string,
+    groupName?: string
+  ): Promise<void> => {
+    return await invoke("export_qr_codes_by_group_to_pdf", {
+      filePath,
+      groupName,
+    });
+  },
+
+  /**
+   * Validate QR code
+   */
+  validateQRCode: async (studentId: string): Promise<boolean> => {
+    return await invoke("validate_qr_code", { studentId });
+  },
+
+  /**
+   * Get QR code statistics
+   */
+  getQRCodeStatistics: async (): Promise<QRCodeStatistics> => {
+    return await invoke("get_qr_code_statistics");
+  },
+};
