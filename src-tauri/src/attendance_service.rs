@@ -457,7 +457,11 @@ impl AttendanceService {
         let mut summaries = Vec::new();
 
         for date in dates {
-            let summary = Self::get_daily_attendance_summary(db, &date, group_name)?;
+            let summary = Self::get_daily_attendance_summary(
+                db,
+                &date,
+                group_name.map(|s| s.to_string()).as_deref(),
+            )?;
             summaries.push(summary);
         }
 
@@ -625,10 +629,10 @@ mod tests {
 
     #[test]
     fn test_mark_attendance_success() {
-        let (db, _temp_dir) = setup_test_db();
+        let (mut db, _temp_dir) = setup_test_db();
         create_test_student(&db, "student1", "Test Student", "Group A");
 
-        let result = AttendanceService::mark_attendance(&db, "student1", "2024-01-15");
+        let result = AttendanceService::mark_attendance(&mut db, "student1", "2024-01-15");
         assert!(result.is_ok());
 
         let record = result.unwrap();
@@ -638,15 +642,15 @@ mod tests {
 
     #[test]
     fn test_mark_attendance_duplicate_prevention() {
-        let (db, _temp_dir) = setup_test_db();
+        let (mut db, _temp_dir) = setup_test_db();
         create_test_student(&db, "student1", "Test Student", "Group A");
 
         // First attendance should succeed
-        let result1 = AttendanceService::mark_attendance(&db, "student1", "2024-01-15");
+        let result1 = AttendanceService::mark_attendance(&mut db, "student1", "2024-01-15");
         assert!(result1.is_ok());
 
         // Second attendance on same date should fail
-        let result2 = AttendanceService::mark_attendance(&db, "student1", "2024-01-15");
+        let result2 = AttendanceService::mark_attendance(&mut db, "student1", "2024-01-15");
         assert!(result2.is_err());
         assert!(result2
             .unwrap_err()
@@ -656,9 +660,9 @@ mod tests {
 
     #[test]
     fn test_mark_attendance_nonexistent_student() {
-        let (db, _temp_dir) = setup_test_db();
+        let (mut db, _temp_dir) = setup_test_db();
 
-        let result = AttendanceService::mark_attendance(&db, "nonexistent", "2024-01-15");
+        let result = AttendanceService::mark_attendance(&mut db, "nonexistent", "2024-01-15");
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("does not exist"));
     }
@@ -691,9 +695,9 @@ mod tests {
         create_test_student(&db, "student2", "Test Student 2", "Group B");
 
         // Mark attendance for different dates
-        AttendanceService::mark_attendance(&db, "student1", "2024-01-15").unwrap();
-        AttendanceService::mark_attendance(&db, "student1", "2024-01-16").unwrap();
-        AttendanceService::mark_attendance(&db, "student2", "2024-01-15").unwrap();
+        AttendanceService::mark_attendance(&mut db, "student1", "2024-01-15").unwrap();
+        AttendanceService::mark_attendance(&mut db, "student1", "2024-01-16").unwrap();
+        AttendanceService::mark_attendance(&mut db, "student2", "2024-01-15").unwrap();
 
         // Get all attendance
         let all_attendance = AttendanceService::get_attendance_history(&db, None).unwrap();
@@ -716,12 +720,12 @@ mod tests {
 
     #[test]
     fn test_get_student_attendance_stats() {
-        let (db, _temp_dir) = setup_test_db();
+        let (mut db, _temp_dir) = setup_test_db();
         create_test_student(&db, "student1", "Test Student", "Group A");
 
         // Mark attendance for some days
-        AttendanceService::mark_attendance(&db, "student1", "2024-01-15").unwrap();
-        AttendanceService::mark_attendance(&db, "student1", "2024-01-16").unwrap();
+        AttendanceService::mark_attendance(&mut db, "student1", "2024-01-15").unwrap();
+        AttendanceService::mark_attendance(&mut db, "student1", "2024-01-16").unwrap();
 
         let stats = AttendanceService::get_student_attendance_stats(
             &db,
@@ -785,8 +789,8 @@ mod tests {
         create_test_student(&db, "student3", "Test Student 3", "Group B");
 
         // Mark attendance for some students
-        AttendanceService::mark_attendance(&db, "student1", "2024-01-15").unwrap();
-        AttendanceService::mark_attendance(&db, "student2", "2024-01-15").unwrap();
+        AttendanceService::mark_attendance(&mut db, "student1", "2024-01-15").unwrap();
+        AttendanceService::mark_attendance(&mut db, "student2", "2024-01-15").unwrap();
 
         let summary =
             AttendanceService::get_daily_attendance_summary(&db, "2024-01-15", None).unwrap();
@@ -806,11 +810,11 @@ mod tests {
 
     #[test]
     fn test_delete_attendance() {
-        let (db, _temp_dir) = setup_test_db();
+        let (mut db, _temp_dir) = setup_test_db();
         create_test_student(&db, "student1", "Test Student", "Group A");
 
         // Mark attendance
-        AttendanceService::mark_attendance(&db, "student1", "2024-01-15").unwrap();
+        AttendanceService::mark_attendance(&mut db, "student1", "2024-01-15").unwrap();
 
         // Verify attendance exists
         assert!(
