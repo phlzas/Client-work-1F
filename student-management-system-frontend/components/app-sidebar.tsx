@@ -30,6 +30,7 @@ import { useMemo } from "react";
 import type { Student } from "@/types";
 import { useSidebar } from "@/components/ui/sidebar";
 import { transformStudentsForUI } from "@/lib/data-transform";
+import { useKeyboardNavigation } from "@/hooks/useKeyboardNavigation";
 
 interface AppSidebarProps {
   activeView: string;
@@ -43,6 +44,21 @@ export function AppSidebar({
   students,
 }: AppSidebarProps) {
   const { state, toggleSidebar } = useSidebar();
+
+  // Keyboard navigation for sidebar
+  const { containerRef } = useKeyboardNavigation({
+    enableArrowKeys: true,
+    enableEnterKey: true,
+    onEnter: (event) => {
+      const target = event.target as HTMLElement;
+      if (target.getAttribute("data-view")) {
+        onViewChange(target.getAttribute("data-view")!);
+      }
+    },
+  });
+
+  // Type-safe ref casting for Sidebar component
+  const sidebarRef = containerRef as React.RefObject<HTMLDivElement>;
 
   // Calculate statistics with memoization
   const { totalStudents, overdueStudents, dueSoonStudents, paidStudents } =
@@ -129,43 +145,73 @@ export function AppSidebar({
   ];
 
   return (
-    <Sidebar collapsible="icon" className="border-l border-sidebar-border">
+    <Sidebar
+      collapsible="icon"
+      className="border-l border-sidebar-border"
+      ref={sidebarRef}
+    >
       <SidebarHeader className="border-b border-sidebar-border">
         <div className="flex items-center justify-between py-2 px-0">
           <div className="flex items-center gap-2">
             <button
               onClick={toggleSidebar}
               className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground hover:bg-sidebar-primary/80 transition-colors group-data-[collapsible=icon]:cursor-pointer group-data-[collapsible=icon]:ring-2 group-data-[collapsible=icon]:ring-sidebar-ring group-data-[collapsible=icon]:shadow-md"
-              title={state === "collapsed" ? "فتح الشريط الجانبي" : undefined}
+              title={
+                state === "collapsed"
+                  ? "فتح الشريط الجانبي"
+                  : "طي الشريط الجانبي"
+              }
+              aria-label={
+                state === "collapsed"
+                  ? "فتح الشريط الجانبي"
+                  : "طي الشريط الجانبي"
+              }
             >
-              <QrCode className="size-4 group-data-[collapsible=icon]:animate-pulse" />
+              <QrCode
+                className="size-4 group-data-[collapsible=icon]:animate-pulse"
+                aria-hidden="true"
+              />
             </button>
             <div className="grid flex-1 text-right text-sm leading-tight group-data-[collapsible=icon]:hidden">
               <span className="truncate font-semibold">نظام إدارة الطلاب</span>
               <span className="truncate text-xs">الإصدار 1.0</span>
             </div>
           </div>
-          <SidebarTrigger className="h-6 w-6 group-data-[collapsible=icon]:hidden" />
+          <SidebarTrigger
+            className="h-6 w-6 group-data-[collapsible=icon]:hidden"
+            aria-label="تبديل الشريط الجانبي"
+          />
         </div>
       </SidebarHeader>
 
-      <SidebarContent>
+      <SidebarContent
+        id="sidebar-navigation"
+        role="navigation"
+        aria-label="التنقل الرئيسي"
+      >
         {/* Main Navigation */}
         <SidebarGroup>
           <SidebarGroupLabel>التنقل الرئيسي</SidebarGroupLabel>
           <SidebarGroupContent>
-            <SidebarMenu>
+            <SidebarMenu role="menu">
               {mainNavItems.map((item) => (
-                <SidebarMenuItem key={item.title}>
+                <SidebarMenuItem key={item.title} role="none">
                   <SidebarMenuButton
                     onClick={() => onViewChange(item.url)}
                     isActive={activeView === item.url}
                     className="w-full justify-start"
+                    data-view={item.url}
+                    role="menuitem"
+                    aria-current={activeView === item.url ? "page" : undefined}
                   >
-                    <item.icon className="size-4" />
+                    <item.icon className="size-4" aria-hidden="true" />
                     <span>{item.title}</span>
                     {item.badge && (
-                      <Badge variant="secondary" className="mr-auto">
+                      <Badge
+                        variant="secondary"
+                        className="mr-auto"
+                        aria-label={`${item.badge} عنصر`}
+                      >
                         {item.badge}
                       </Badge>
                     )}
@@ -180,22 +226,26 @@ export function AppSidebar({
         <SidebarGroup>
           <SidebarGroupLabel>إدارة المدفوعات</SidebarGroupLabel>
           <SidebarGroupContent>
-            <SidebarMenu>
+            <SidebarMenu role="menu">
               {paymentNavItems.map((item) => (
-                <SidebarMenuItem key={item.title}>
+                <SidebarMenuItem key={item.title} role="none">
                   <SidebarMenuButton
                     onClick={() => onViewChange(item.url)}
                     isActive={activeView === item.url}
                     className={`w-full justify-start ${
                       item.isSubItem ? "pr-8 text-sm" : ""
                     }`}
+                    data-view={item.url}
+                    role="menuitem"
+                    aria-current={activeView === item.url ? "page" : undefined}
                   >
-                    <item.icon className="size-4" />
+                    <item.icon className="size-4" aria-hidden="true" />
                     <span>{item.title}</span>
                     {item.badge && (
                       <Badge
                         variant={item.badgeVariant || "secondary"}
                         className="mr-auto"
+                        aria-label={`${item.badge} عنصر`}
                       >
                         {item.badge}
                       </Badge>
@@ -211,18 +261,25 @@ export function AppSidebar({
         <SidebarGroup>
           <SidebarGroupLabel>التقارير والإعدادات</SidebarGroupLabel>
           <SidebarGroupContent>
-            <SidebarMenu>
+            <SidebarMenu role="menu">
               {reportsNavItems.map((item) => (
-                <SidebarMenuItem key={item.title}>
+                <SidebarMenuItem key={item.title} role="none">
                   <SidebarMenuButton
                     onClick={() => onViewChange(item.url)}
                     isActive={activeView === item.url}
                     className="w-full justify-start"
+                    data-view={item.url}
+                    role="menuitem"
+                    aria-current={activeView === item.url ? "page" : undefined}
                   >
-                    <item.icon className="size-4" />
+                    <item.icon className="size-4" aria-hidden="true" />
                     <span>{item.title}</span>
                     {item.badge && (
-                      <Badge variant="secondary" className="mr-auto">
+                      <Badge
+                        variant="secondary"
+                        className="mr-auto"
+                        aria-label={`${item.badge} عنصر`}
+                      >
                         {item.badge}
                       </Badge>
                     )}

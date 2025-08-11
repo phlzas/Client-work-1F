@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { ApiService } from "@/lib/api";
 
 interface Group {
@@ -17,29 +17,51 @@ export function useGroups() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [mutating, setMutating] = useState(false);
+  const [lastFetch, setLastFetch] = useState<number>(0);
 
-  const loadGroups = async (showLoading = true) => {
-    try {
-      if (showLoading) setLoading(true);
-      setError(null);
-      const groupsData = await ApiService.getAllGroups();
-      setGroups(groupsData);
-    } catch (err) {
-      console.error("Failed to load groups:", err);
-      setError(err instanceof Error ? err.message : "Failed to load groups");
+  // Cache duration: 5 minutes
+  const CACHE_DURATION = 5 * 60 * 1000;
 
-      // Only use fallback on initial load, not on refresh
-      if (groups.length === 0) {
-        setGroups([
-          { id: 1, name: "Group A", created_at: "", updated_at: "" },
-          { id: 2, name: "Group B", created_at: "", updated_at: "" },
-          { id: 3, name: "Group C", created_at: "", updated_at: "" },
-        ]);
+  const loadGroups = useCallback(
+    async (showLoading = true, forceRefresh = false) => {
+      // Skip if data is fresh and not forcing refresh
+      const now = Date.now();
+      if (
+        !forceRefresh &&
+        groups.length > 0 &&
+        now - lastFetch < CACHE_DURATION
+      ) {
+        return;
       }
-    } finally {
-      if (showLoading) setLoading(false);
-    }
-  };
+
+      try {
+        if (showLoading) setLoading(true);
+        setError(null);
+        const groupsData = await ApiService.getAllGroups();
+        setGroups(groupsData);
+        setLastFetch(now);
+      } catch (err) {
+        console.error("Failed to load groups:", err);
+        const errorMessage =
+          err instanceof Error ? err.message : "Failed to load groups";
+        setError(errorMessage);
+
+        // Only use fallback on initial load, not on refresh
+        if (groups.length === 0) {
+          console.warn("Using fallback groups due to API failure");
+          setGroups([
+            { id: 1, name: "المجموعة الأولى", created_at: "", updated_at: "" },
+            { id: 2, name: "المجموعة الثانية", created_at: "", updated_at: "" },
+            { id: 3, name: "المجموعة الثالثة", created_at: "", updated_at: "" },
+          ]);
+          setLastFetch(now);
+        }
+      } finally {
+        if (showLoading) setLoading(false);
+      }
+    },
+    [groups.length, lastFetch]
+  );
 
   useEffect(() => {
     loadGroups();
@@ -108,6 +130,45 @@ export function useGroups() {
     }
   };
 
+  const forceDeleteGroupWithReassignment = async (
+    id: number,
+    defaultGroupName: string
+  ): Promise<boolean> => {
+    setMutating(true);
+    const originalGroups = groups;
+
+    try {
+      // Optimistic update
+      setGroups((prev) => prev.filter((group) => group.id !== id));
+
+      const result = await ApiService.forceDeleteGroupWithReassignment(
+        id,
+        defaultGroupName
+      );
+      if (!result) {
+        // Revert if deletion failed
+        setGroups(originalGroups);
+      }
+      return result;
+    } catch (err) {
+      // Revert on error
+      setGroups(originalGroups);
+      throw err;
+    } finally {
+      setMutating(false);
+    }
+  };
+
+  const getStudentCountByGroupId = async (groupId: number): Promise<number> => {
+    try {
+      return await ApiService.getStudentsCountByGroupId(groupId);
+    } catch (err) {
+      console.error(`Failed to get student count for group ${groupId}:`, err);
+      // Return 0 as fallback instead of throwing
+      return 0;
+    }
+  };
+
   return {
     groups,
     loading,
@@ -117,6 +178,8 @@ export function useGroups() {
     addGroup,
     updateGroup,
     deleteGroup,
+    forceDeleteGroupWithReassignment,
+    getStudentCountByGroupId,
   };
 }
 
