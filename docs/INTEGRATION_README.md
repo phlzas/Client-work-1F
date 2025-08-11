@@ -24,6 +24,7 @@ This document explains how the modern Next.js frontend has been integrated with 
 - **Features**:
   - Complete CRUD operations for students
   - Attendance tracking with QR code support
+  - QR code generation and PDF export
   - Payment management and tracking
   - Settings and configuration management
   - Audit logging
@@ -221,6 +222,12 @@ cargo tauri dev  # Automatically builds frontend and runs Tauri
 - `updateSettings(settings)` - Update settings
 - `getSetting(key)` - Get specific setting
 
+### QR Codes (Coming Soon)
+
+- `generateQRCode(studentId)` - Generate QR code for student
+- `generateBatchQRCodes(studentIds)` - Generate multiple QR codes
+- `exportQRCodesPDF(studentIds, groupName?)` - Export QR codes as PDF
+
 ## Troubleshooting
 
 ### Common Issues
@@ -237,6 +244,17 @@ Run with debug logging:
 ```bash
 RUST_LOG=debug cargo tauri dev
 ```
+
+## Additional Tools
+
+### SerpAPI MCP Server
+
+The project includes a Model Context Protocol (MCP) server for web search capabilities:
+
+- **Location**: `.kiro/serpapi_mcp_server.py`
+- **Purpose**: Enables AI assistants to perform web searches through SerpAPI
+- **Configuration**: Requires SerpAPI key in MCP settings
+- **Documentation**: See `MCP_SERPAPI_DOCUMENTATION.md` for details
 
 ## Next Steps
 

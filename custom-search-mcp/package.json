@@ -1,0 +1,22 @@
+{
+  "name": "custom-search-mcp-server",
+  "version": "1.0.0",
+  "description": "Custom web search MCP server without API keys",
+  "main": "custom-search-mcp.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node custom-search-mcp.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^0.5.0",
+    "cheerio": "^1.1.2",
+    "node-fetch": "^2.7.0"
+  },
+  "devDependencies": {
+    "@types/node-fetch": "^2.6.4",
+    "@types/cheerio": "^0.22.31"
+  },
+  "engines": {
+    "node": ">=16"
+  }
+}
