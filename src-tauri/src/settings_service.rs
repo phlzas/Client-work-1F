@@ -347,15 +347,15 @@ impl SettingsService {
         Ok(count >= 13)
     }
 
-    /// Get settings that have been modified recently
-    pub fn get_recently_modified_settings(db: &Database, hours: i32) -> DatabaseResult<Vec<SettingRecord>> {
+    /// Get recently modified settings within the specified number of days
+    pub fn get_recently_modified_settings(db: &Database, days: i32) -> DatabaseResult<Vec<SettingRecord>> {
         let mut stmt = db.connection().prepare(
             "SELECT key, value, updated_at FROM settings 
-             WHERE updated_at > datetime('now', '-' || ?1 || ' hours')
+             WHERE updated_at >= datetime('now', '-' || ?1 || ' days')
              ORDER BY updated_at DESC"
         )?;
 
-        let setting_iter = stmt.query_map([hours], |row| {
+        let setting_iter = stmt.query_map([days], |row| {
             Ok(SettingRecord {
                 key: row.get(0)?,
                 value: row.get(1)?,
