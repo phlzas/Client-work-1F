@@ -1,124 +1,203 @@
-// Payment plan types with better discrimination
-export type PaymentPlan = "one-time" | "monthly" | "installment";
-export type PaymentStatus = "paid" | "pending" | "overdue" | "due_soon";
+// Core data types for the Student Management System
 
-// Base student interface (backend format)
-export interface StudentBase {
+export interface BaseStudent {
   id: string;
   name: string;
   group_name: string;
-  payment_plan: PaymentPlan;
+  payment_plan: "one-time" | "monthly" | "installment";
   plan_amount: number;
-  installment_count?: number;
   paid_amount: number;
   enrollment_date: string;
-  next_due_date?: string | null;
-  payment_status: PaymentStatus;
+  payment_status: "paid" | "pending" | "overdue" | "due_soon";
+  next_due_date: string | null;
+  installment_count?: number;
   created_at: string;
   updated_at: string;
 }
 
-// Extended student with optional relations
-export interface Student extends StudentBase {
-  attendance_log?: AttendanceRecord[];
-  payment_history?: PaymentTransaction[];
-
-  // UI compatibility aliases (computed properties)
+export interface Student extends BaseStudent {
   group?: string;
-  paymentPlan?: PaymentPlan;
-  planAmount?: number;
-  installmentCount?: number;
+  paymentStatus?: string;
   paidAmount?: number;
-  enrollmentDate?: string;
+  planAmount?: number;
+  paymentPlan?: "one-time" | "monthly" | "installment";
   nextDueDate?: string | null;
-  paymentStatus?: PaymentStatus;
-  attendanceLog?: AttendanceRecord[];
-  paymentHistory?: PaymentTransaction[];
-  createdAt?: string;
-  updatedAt?: string;
+  installmentCount?: number;
 }
 
-// Form data type for student creation/editing
-export interface StudentFormData {
-  name: string;
-  group_name: string;
-  payment_plan: PaymentPlan;
-  plan_amount: number;
-  installment_count?: number;
-  paid_amount: number;
-  enrollment_date: string;
-  payment_status: PaymentStatus;
-  next_due_date?: string | null;
-}
-
-export interface AttendanceRecord {
+export interface BaseAttendanceRecord {
   id: number;
-  student_id: string; // Backend uses snake_case
+  student_id: string;
   date: string;
-  created_at: string; // Backend uses snake_case
+  created_at: string;
+}
 
-  // UI compatibility aliases
-  studentId?: string; // Alias for student_id
-  createdAt?: string; // Alias for created_at
+export interface AttendanceRecord extends BaseAttendanceRecord {
+  studentId?: string;
+  createdAt?: string;
+}
+
+export interface Group {
+  id: number;
+  name: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface PaymentSettings {
+  one_time_amount: number;
+  monthly_amount: number;
+  installment_amount: number;
+  installment_interval_months: number;
+}
+
+export interface AppSettings {
+  payment_threshold: number;
+  default_groups: string[];
+  enable_audit_log: boolean;
+  language: "ar" | "en";
+  theme: "light" | "dark";
+  enable_multi_user: boolean;
+  backup_encryption: boolean;
+  accessibility_mode: boolean;
+  reminder_days: number;
 }
 
 export interface PaymentTransaction {
   id: number;
-  student_id: string; // Backend uses snake_case
+  student_id: string;
   amount: number;
-  payment_date: string; // Backend uses snake_case
-  payment_method: "cash" | "bank_transfer" | "check"; // Backend uses snake_case
+  payment_date: string;
+  payment_method: string;
   notes?: string;
-  created_at: string; // Backend uses snake_case
-
-  // UI compatibility aliases
-  studentId?: string; // Alias for student_id
-  paymentDate?: string; // Alias for payment_date
-  paymentMethod?: "cash" | "bank_transfer" | "check"; // Alias for payment_method
-  createdAt?: string; // Alias for created_at
+  created_at: string;
 }
 
-export interface PaymentPlanConfig {
-  oneTimeAmount: number;
-  monthlyAmount: number;
-  installmentAmount: number;
-  installmentInterval: number;
-  reminderDays: number;
+export interface QRCodeData {
+  student_id: string;
+  student_name: string;
+  group_name: string;
+  qr_code_base64: string;
 }
 
-export interface AppSettings {
-  payment_threshold: number; // Backend uses snake_case
-  default_groups: string[]; // Backend uses snake_case
-  enable_audit_log: boolean; // Backend uses snake_case
-  language: "en" | "ar";
-  theme: "light" | "dark";
-  enable_multi_user: boolean; // Backend uses snake_case
-  backup_encryption: boolean; // Backend uses snake_case
-  accessibility_mode: boolean; // Backend uses snake_case
-  reminder_days: number; // Backend uses snake_case
-
-  // UI compatibility aliases
-  paymentThreshold?: number; // Alias for payment_threshold
-  defaultGroups?: string[]; // Alias for default_groups
-  enableAuditLog?: boolean; // Alias for enable_audit_log
-  enableMultiUser?: boolean; // Alias for enable_multi_user
-  backupEncryption?: boolean; // Alias for backup_encryption
-  accessibilityMode?: boolean; // Alias for accessibility_mode
+export interface QRCodeBatch {
+  group_name: string;
+  qr_codes: QRCodeData[];
 }
 
-export interface User {
-  id: string;
-  username: string;
-  role: "admin" | "user" | "readonly";
-  createdAt: string;
-  lastLogin?: string;
+export interface QRCodeStatistics {
+  total_qr_codes: number;
+  groups_count: number;
+  students_with_qr: number;
 }
 
-export interface PaymentSummary {
-  totalStudents: number;
-  paidStudents: number;
-  overdueStudents: number;
-  dueSoonStudents: number;
-  totalRevenue: number;
-  pendingRevenue: number;
+export interface BackupMetadata {
+  file_path: string;
+  created_at: string;
+  file_size: number;
+  student_count: number;
+  encrypted: boolean;
+  version: string;
 }
+
+export interface RestoreResult {
+  success: boolean;
+  message: string;
+  students_restored: number;
+  attendance_restored: number;
+  payments_restored: number;
+  errors?: string[];
+}
+
+export interface BackupValidationResult {
+  is_valid: boolean;
+  message: string;
+  metadata?: BackupMetadata;
+  errors?: string[];
+}
+
+// API Response types
+export interface ApiResponse<T = any> {
+  success: boolean;
+  data?: T;
+  message?: string;
+  error?: string;
+}
+
+export interface AttendanceResponse {
+  success: boolean;
+  message: string;
+  student_name: string;
+  payment_status?: string;
+}
+
+export interface StudentFormData {
+  name: string;
+  group_name: string;
+  payment_plan: "one-time" | "monthly" | "installment";
+  plan_amount?: number;
+  paid_amount?: number;
+  enrollment_date?: string;
+  installment_count?: number;
+}
+
+// Hook return types
+export interface UseGroupsReturn {
+  groups: Group[];
+  loading: boolean;
+  error: string | null;
+  addGroup: (name: string) => Promise<void>;
+  updateGroup: (id: number, name: string) => Promise<void>;
+  deleteGroup: (id: number) => Promise<void>;
+  refreshGroups: () => Promise<void>;
+}
+
+export interface UsePaymentSettingsReturn {
+  settings: PaymentSettings | null;
+  loading: boolean;
+  error: string | null;
+  updateSettings: (settings: Partial<PaymentSettings>) => Promise<void>;
+  refreshSettings: () => Promise<void>;
+}
+
+// Component prop types
+export interface StudentGridProps {
+  students: Student[];
+  onEditStudent: (student: Student) => void;
+  onDeleteStudent: (student: Student) => void;
+  onAddStudent: () => void;
+  loading?: boolean;
+}
+
+export interface StudentFormProps {
+  isOpen: boolean;
+  student: Student | null;
+  onSubmit: (data: StudentFormData) => void;
+  onCancel?: () => void;
+  onClose?: () => void;
+}
+
+export interface QRScannerProps {
+  onScan: (studentId: string) => void;
+  result: string;
+  loading?: boolean;
+}
+
+// Filter and search types
+export interface StudentFilters {
+  search: string;
+  paymentStatus: string;
+  group: string;
+  paymentPlan: string;
+}
+
+export interface SortConfig {
+  key: keyof Student;
+  direction: "asc" | "desc";
+}
+
+// Export utility types
+export type PaymentStatus = Student["payment_status"];
+export type PaymentPlan = Student["payment_plan"];
+export type Theme = AppSettings["theme"];
+export type Language = AppSettings["language"];
