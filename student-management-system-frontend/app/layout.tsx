@@ -21,9 +21,11 @@ html {
 }
         `}</style>
       </head>
-      <body>
-        {children}
-        <Toaster />
+      <body className="overflow-x-hidden">
+        <div className="max-w-screen min-h-screen overflow-x-hidden">
+          {children}
+          <Toaster />
+        </div>
       </body>
     </html>
   );
