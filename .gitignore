@@ -55,3 +55,6 @@ Thumbs.db
 
 # Kiro configuration (keep this)
 .kiro/
+
+# YoYo AI version control directory
+.yoyo/
