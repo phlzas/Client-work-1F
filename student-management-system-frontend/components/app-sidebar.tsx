@@ -14,7 +14,6 @@ import {
 import {
   Sidebar,
   SidebarContent,
-  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
@@ -45,26 +44,22 @@ export function AppSidebar({
 }: AppSidebarProps) {
   const { state, toggleSidebar } = useSidebar();
 
-  // Transform students and calculate statistics with memoization
-  const {
-    transformedStudents,
-    totalStudents,
-    overdueStudents,
-    dueSoonStudents,
-    paidStudents,
-  } = useMemo(() => {
-    const transformed = transformStudentsForUI(students);
-    return {
-      transformedStudents: transformed,
-      totalStudents: transformed.length,
-      overdueStudents: transformed.filter((s) => s.paymentStatus === "overdue")
-        .length,
-      dueSoonStudents: transformed.filter((s) => s.paymentStatus === "due_soon")
-        .length,
-      paidStudents: transformed.filter((s) => s.paymentStatus === "paid")
-        .length,
-    };
-  }, [students]);
+  // Calculate statistics with memoization
+  const { totalStudents, overdueStudents, dueSoonStudents, paidStudents } =
+    useMemo(() => {
+      const transformed = transformStudentsForUI(students);
+      return {
+        totalStudents: transformed.length,
+        overdueStudents: transformed.filter(
+          (s) => s.paymentStatus === "overdue"
+        ).length,
+        dueSoonStudents: transformed.filter(
+          (s) => s.paymentStatus === "due_soon"
+        ).length,
+        paidStudents: transformed.filter((s) => s.paymentStatus === "paid")
+          .length,
+      };
+    }, [students]);
 
   const mainNavItems = [
     {
@@ -83,6 +78,12 @@ export function AppSidebar({
       title: "تسجيل الحضور",
       url: "attendance",
       icon: Calendar,
+      badge: null,
+    },
+    {
+      title: "رموز الاستجابة السريعة",
+      url: "qr-codes",
+      icon: QrCode,
       badge: null,
     },
   ];
@@ -267,14 +268,6 @@ export function AppSidebar({
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
-
-      <SidebarFooter className="border-t border-sidebar-border group-data-[collapsible=icon]:hidden">
-        <div className="p-4 text-center text-xs text-muted-foreground">
-          <p>© 2024 نظام إدارة الطلاب</p>
-          <p>جميع الحقوق محفوظة</p>
-        </div>
-      </SidebarFooter>
-
       <SidebarRail />
     </Sidebar>
   );

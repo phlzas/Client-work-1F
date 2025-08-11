@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { toast } from "@/hooks/use-toast";
 import { StudentGrid } from "@/components/student-grid";
 import { QRScanner } from "@/components/qr-scanner";
 import { StudentForm } from "@/components/student-form";
@@ -10,6 +11,7 @@ import { PaymentReminders } from "@/components/payment-reminders";
 import { AttendanceView } from "@/components/attendance-view";
 import { DashboardStats } from "@/components/dashboard-stats";
 import { AppSidebar } from "@/components/app-sidebar";
+import { QRCodeManager } from "@/components/qr-code-manager";
 import {
   SidebarProvider,
   SidebarInset,
@@ -20,6 +22,7 @@ import {
   transformStudentsForUI,
   transformSettingsForUI,
   getPaymentStatusText,
+  normalizeStudentData,
 } from "@/lib/data-transform";
 import type { Student, AppSettings } from "@/types";
 
@@ -35,6 +38,39 @@ const defaultSettings: AppSettings = {
   reminder_days: 7,
 };
 
+// Centralized error message handling
+function getErrorMessage(err: unknown, operation: string): string {
+  if (err instanceof Error) {
+    // Map common backend errors to Arabic messages
+    const errorMappings: Record<string, string> = {
+      "Group name is required": "المجموعة مطلوبة",
+      "Student name is required": "اسم الطالب مطلوب",
+      "Plan amount must be positive": "مبلغ الخطة يجب أن يكون أكبر من صفر",
+      "Student with ID": "الطالب غير موجود",
+      "Failed to execute": "فشل في تنفيذ العملية",
+    };
+
+    for (const [key, value] of Object.entries(errorMappings)) {
+      if (err.message.includes(key)) {
+        return value;
+      }
+    }
+
+    // Return the original error message if no mapping found
+    return `خطأ: ${err.message}`;
+  }
+
+  // Fallback for unknown error types
+  const operationNames: Record<string, string> = {
+    add_student: "إضافة الطالب",
+    update_student: "تحديث الطالب",
+    delete_student: "حذف الطالب",
+    load_data: "تحميل البيانات",
+  };
+
+  return `فشل في ${operationNames[operation] || operation}`;
+}
+
 export default function StudentManagementSystem() {
   const [students, setStudents] = useState<Student[]>([]);
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
@@ -42,8 +78,8 @@ export default function StudentManagementSystem() {
   const [isStudentFormOpen, setIsStudentFormOpen] = useState(false);
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [scanResult, setScanResult] = useState<string>("");
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
 
   // Load data from backend on component mount
   useEffect(() => {
@@ -52,7 +88,7 @@ export default function StudentManagementSystem() {
 
   const loadInitialData = async () => {
     try {
-      setLoading(true);
+      setIsLoading(true);
       setError(null);
 
       // Initialize default data first
@@ -73,7 +109,7 @@ export default function StudentManagementSystem() {
       console.error("Failed to load initial data:", err);
       setError("فشل في تحميل البيانات. يرجى المحاولة مرة أخرى.");
     } finally {
-      setLoading(false);
+      setIsLoading(false);
     }
   };
 
@@ -88,23 +124,30 @@ export default function StudentManagementSystem() {
   };
 
   const handleStudentScan = async (studentId: string) => {
+    if (!studentId?.trim()) {
+      setScanResult("رقم الطالب غير صحيح");
+      return;
+    }
+
     try {
       // Check if student exists
-      const student = await ApiService.getStudentById(studentId);
+      const student = await ApiService.getStudentById(studentId.trim());
       if (!student) {
         setScanResult("رقم الطالب غير موجود");
         return;
       }
 
       // Check if already marked attendance today
-      const alreadyMarked = await ApiService.checkAttendanceToday(studentId);
+      const alreadyMarked = await ApiService.checkAttendanceToday(
+        studentId.trim()
+      );
       if (alreadyMarked) {
         setScanResult(`${student.name} - تم تسجيل الحضور مسبقاً اليوم`);
         return;
       }
 
       // Mark attendance
-      await ApiService.markAttendance(studentId);
+      await ApiService.markAttendance(studentId.trim());
       setScanResult(
         `تم تسجيل حضور ${student.name} - حالة الدفع: ${getPaymentStatusText(
           student.payment_status || student.paymentStatus || "pending"
@@ -115,7 +158,9 @@ export default function StudentManagementSystem() {
       await refreshStudents();
     } catch (err) {
       console.error("Failed to scan student:", err);
-      setScanResult("حدث خطأ أثناء تسجيل الحضور");
+      const errorMessage =
+        err instanceof Error ? err.message : "حدث خطأ غير متوقع";
+      setScanResult(`خطأ في تسجيل الحضور: ${errorMessage}`);
     }
   };
 
@@ -128,32 +173,27 @@ export default function StudentManagementSystem() {
     try {
       console.log("Adding student with data:", studentData);
 
-      // Validate required fields before sending to API
-      if (!studentData.name?.trim()) {
+      // Normalize data to consistent format and validate
+      const normalizedData = normalizeStudentData(studentData);
+
+      if (!normalizedData.name.trim()) {
         throw new Error("اسم الطالب مطلوب");
       }
 
-      const groupName = studentData.group_name || studentData.group || "";
-      if (!groupName.trim()) {
+      if (!normalizedData.group_name.trim()) {
         throw new Error("المجموعة مطلوبة");
       }
 
-      console.log("Sending to API:", {
-        name: studentData.name,
-        groupName: groupName,
-        paymentPlan:
-          studentData.payment_plan || studentData.paymentPlan || "one-time",
-        planAmount: studentData.plan_amount || studentData.planAmount || 0,
-        installmentCount:
-          studentData.installment_count || studentData.installmentCount,
-      });
+      console.log("Sending normalized data to API:", normalizedData);
 
       const result = await ApiService.addStudent(
-        studentData.name,
-        groupName,
-        studentData.payment_plan || studentData.paymentPlan || "one-time",
-        studentData.plan_amount || studentData.planAmount || 0,
-        studentData.installment_count || studentData.installmentCount
+        normalizedData.name,
+        normalizedData.group_name,
+        normalizedData.payment_plan,
+        normalizedData.plan_amount,
+        normalizedData.installment_count,
+        normalizedData.paid_amount,
+        normalizedData.enrollment_date
       );
 
       console.log("Student added successfully:", result);
@@ -165,58 +205,75 @@ export default function StudentManagementSystem() {
     } catch (err) {
       console.error("Failed to add student:", err);
 
-      let errorMessage = "فشل في إضافة الطالب";
-      if (err instanceof Error) {
-        if (err.message.includes("Group name is required")) {
-          errorMessage = "المجموعة مطلوبة";
-        } else if (err.message.includes("Student name is required")) {
-          errorMessage = "اسم الطالب مطلوب";
-        } else if (err.message.includes("Plan amount must be positive")) {
-          errorMessage = "مبلغ الخطة يجب أن يكون أكبر من صفر";
-        } else if (err.message.includes("add_student")) {
-          errorMessage = `خطأ في إضافة الطالب: ${err.message}`;
-        } else {
-          errorMessage = `فشل في إضافة الطالب: ${err.message}`;
-        }
-      }
-
+      const errorMessage = getErrorMessage(err, "add_student");
       setError(errorMessage);
     }
   };
 
   const handleUpdateStudent = async (updatedStudent: Student) => {
     try {
+      setIsLoading(true);
+      console.log("Updating student with data:", updatedStudent);
+
+      // Normalize data to consistent format
+      const normalizedData = normalizeStudentData(updatedStudent);
+
       await ApiService.updateStudent(
         updatedStudent.id,
-        updatedStudent.name,
-        updatedStudent.group_name || updatedStudent.group || "",
-        updatedStudent.payment_plan || updatedStudent.paymentPlan || "one-time",
-        updatedStudent.plan_amount || updatedStudent.planAmount || 0,
-        updatedStudent.installment_count || updatedStudent.installmentCount
+        normalizedData.name,
+        normalizedData.group_name,
+        normalizedData.payment_plan,
+        normalizedData.plan_amount,
+        normalizedData.installment_count,
+        normalizedData.paid_amount,
+        normalizedData.enrollment_date
       );
 
       // Refresh students list
       await refreshStudents();
       setEditingStudent(null);
       setIsStudentFormOpen(false);
+      setError(null); // Clear any previous errors
     } catch (err) {
       console.error("Failed to update student:", err);
-      setError("فشل في تحديث بيانات الطالب");
+      const errorMessage = getErrorMessage(err, "update_student");
+      setError(errorMessage);
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  const getPaymentStatusText = (status: string) => {
-    switch (status) {
-      case "paid":
-        return "مدفوع";
-      case "pending":
-        return "في الانتظار";
-      case "overdue":
-        return "متأخر";
-      case "due_soon":
-        return "مستحق قريباً";
-      default:
-        return status;
+  const handleDeleteStudent = async (student: Student) => {
+    // Show confirmation dialog
+    const confirmed = window.confirm(
+      `هل أنت متأكد من حذف الطالب "${student.name}"؟\n\nسيتم حذف جميع بيانات الطالب بما في ذلك سجل الحضور وتاريخ المدفوعات. هذا الإجراء لا يمكن التراجع عنه.`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      await ApiService.deleteStudent(student.id);
+
+      // Refresh students list
+      await refreshStudents();
+
+      // Show success toast
+      toast({
+        title: "تم الحذف بنجاح",
+        description: `تم حذف الطالب "${student.name}" بنجاح`,
+        variant: "default",
+      });
+    } catch (err) {
+      console.error("Failed to delete student:", err);
+
+      // Show error toast
+      toast({
+        title: "خطأ في الحذف",
+        description: `فشل في حذف الطالب "${student.name}". يرجى المحاولة مرة أخرى.`,
+        variant: "destructive",
+      });
     }
   };
 
@@ -237,7 +294,7 @@ export default function StudentManagementSystem() {
               setEditingStudent(student);
               setIsStudentFormOpen(true);
             }}
-            onUpdateStudent={handleUpdateStudent}
+            onDeleteStudent={handleDeleteStudent}
             onAddStudent={() => setIsStudentFormOpen(true)}
           />
         );
@@ -248,7 +305,22 @@ export default function StudentManagementSystem() {
       case "reports":
         return <ExportManager students={students} />;
       case "settings":
-        return <Settings settings={settings} onUpdateSettings={setSettings} />;
+        return (
+          <Settings
+            settings={settings}
+            onUpdateSettings={async (newSettings) => {
+              try {
+                await ApiService.updateSettings(newSettings);
+                setSettings(newSettings);
+              } catch (err) {
+                console.error("Failed to update settings:", err);
+                setError("فشل في حفظ الإعدادات");
+              }
+            }}
+          />
+        );
+      case "qr-codes":
+        return <QRCodeManager />;
       default:
         return (
           <div className="space-y-6">

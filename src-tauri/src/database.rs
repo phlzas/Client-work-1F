@@ -399,6 +399,11 @@ impl Database {
     pub fn connection(&self) -> &Connection {
         &self.connection
     }
+
+    /// Get a mutable reference to the database connection
+    pub fn connection_mut(&mut self) -> &mut Connection {
+        &mut self.connection
+    }
     
     /// Get the database file path
     pub fn db_path(&self) -> &PathBuf {
