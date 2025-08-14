@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Card,
   CardContent,
@@ -35,7 +35,8 @@ import {
   XCircle,
   Search,
 } from "lucide-react";
-import type { Student } from "@/types";
+import type { Student, AttendanceRecord } from "@/types";
+import { ApiService } from "@/lib/api";
 
 interface AttendanceViewProps {
   students: Student[];
@@ -48,20 +49,65 @@ export function AttendanceView({ students }: AttendanceViewProps) {
   const [selectedGroup, setSelectedGroup] = useState<string>("all");
   const [searchTerm, setSearchTerm] = useState("");
 
-  // Mock attendance data - in real app this would come from database
-  const mockAttendanceData = students.map((student) => ({
-    ...student,
-    attendanceToday: Math.random() > 0.3, // 70% attendance rate
-    attendanceCount: Math.floor(Math.random() * 20) + 5,
-    totalSessions: 25,
-    lastAttendance: new Date(
-      Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000
-    )
-      .toISOString()
-      .split("T")[0],
-  }));
+  const [presentIds, setPresentIds] = useState<string[]>([]);
+  const [attendanceStats, setAttendanceStats] = useState<
+    Record<
+      string,
+      {
+        totalAttendance: number;
+        attendanceRate: number;
+        lastAttendance: string | null;
+      }
+    >
+  >({});
 
-  const filteredStudents = mockAttendanceData.filter((student) => {
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const data = await ApiService.getDailyAttendanceSummary(
+          selectedDate,
+          selectedGroup === "all" ? undefined : selectedGroup
+        );
+        setPresentIds(data.present_student_ids || []);
+
+        // Load attendance statistics for each student
+        const stats: Record<
+          string,
+          {
+            totalAttendance: number;
+            attendanceRate: number;
+            lastAttendance: string | null;
+          }
+        > = {};
+
+        for (const student of students) {
+          try {
+            const studentStats = await ApiService.getStudentAttendanceStats(
+              student.id
+            );
+            stats[student.id] = {
+              totalAttendance: studentStats.total_days || 0,
+              attendanceRate: studentStats.attendance_rate || 0,
+              lastAttendance: studentStats.last_attendance_date || null,
+            };
+          } catch (e) {
+            stats[student.id] = {
+              totalAttendance: 0,
+              attendanceRate: 0,
+              lastAttendance: null,
+            };
+          }
+        }
+        setAttendanceStats(stats);
+      } catch (e) {
+        setPresentIds([]);
+        setAttendanceStats({});
+      }
+    };
+    load();
+  }, [selectedDate, selectedGroup, students]);
+
+  const filteredStudents = students.filter((student) => {
     const matchesSearch =
       student.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       student.id.toLowerCase().includes(searchTerm.toLowerCase());
@@ -75,7 +121,9 @@ export function AttendanceView({ students }: AttendanceViewProps) {
     new Set(students.map((s) => s.group_name || s.group || "").filter(Boolean))
   );
 
-  const presentToday = filteredStudents.filter((s) => s.attendanceToday).length;
+  const presentToday = filteredStudents.filter((s) =>
+    presentIds.includes(s.id)
+  ).length;
   const absentToday = filteredStudents.length - presentToday;
   const attendanceRate =
     filteredStudents.length > 0
@@ -91,10 +139,30 @@ export function AttendanceView({ students }: AttendanceViewProps) {
     );
   };
 
+  const formatDate = (dateString: string | null) => {
+    if (!dateString) return "—";
+    try {
+      return new Date(dateString).toLocaleDateString("ar-EG");
+    } catch {
+      return "—";
+    }
+  };
+
   return (
     <div className="space-y-6">
-      {/* Attendance Overview */}
-      <div className="grid gap-4 md:grid-cols-4">
+      {/* Summary Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">إجمالي الطلاب</CardTitle>
+            <Users className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{filteredStudents.length}</div>
+            <p className="text-xs text-muted-foreground">في المجموعة المحددة</p>
+          </CardContent>
+        </Card>
+
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">الحضور اليوم</CardTitle>
@@ -105,7 +173,7 @@ export function AttendanceView({ students }: AttendanceViewProps) {
               {presentToday}
             </div>
             <p className="text-xs text-muted-foreground">
-              من أصل {filteredStudents.length} طالب
+              من {filteredStudents.length} طالب
             </p>
           </CardContent>
         </Card>
@@ -118,10 +186,7 @@ export function AttendanceView({ students }: AttendanceViewProps) {
           <CardContent>
             <div className="text-2xl font-bold text-red-600">{absentToday}</div>
             <p className="text-xs text-muted-foreground">
-              {filteredStudents.length > 0
-                ? ((absentToday / filteredStudents.length) * 100).toFixed(1)
-                : 0}
-              % غياب
+              من {filteredStudents.length} طالب
             </p>
           </CardContent>
         </Card>
@@ -135,36 +200,20 @@ export function AttendanceView({ students }: AttendanceViewProps) {
             <div className="text-2xl font-bold text-blue-600">
               {attendanceRate.toFixed(1)}%
             </div>
-            <p className="text-xs text-muted-foreground">لليوم الحالي</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">إجمالي الطلاب</CardTitle>
-            <Users className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{filteredStudents.length}</div>
-            <p className="text-xs text-muted-foreground">
-              في المجموعات المحددة
-            </p>
+            <p className="text-xs text-muted-foreground">نسبة الحضور اليوم</p>
           </CardContent>
         </Card>
       </div>
 
-      {/* Attendance Controls */}
+      {/* Filters */}
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Calendar className="h-5 w-5" />
-            تسجيل الحضور
-          </CardTitle>
+          <CardTitle>فلاتر الحضور</CardTitle>
           <CardDescription>
-            اختر التاريخ والمجموعة لعرض وتسجيل الحضور
+            اختر التاريخ والمجموعة لعرض سجل الحضور
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="space-y-2">
               <Label htmlFor="date">التاريخ</Label>
@@ -233,63 +282,70 @@ export function AttendanceView({ students }: AttendanceViewProps) {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredStudents.map((student) => (
-                  <TableRow key={student.id}>
-                    <TableCell className="font-medium">{student.id}</TableCell>
-                    <TableCell>{student.name}</TableCell>
-                    <TableCell>{student.group}</TableCell>
-                    <TableCell>
-                      <Badge
-                        className={
-                          student.attendanceToday
-                            ? "bg-green-100 text-green-800 border-green-200"
-                            : "bg-red-100 text-red-800 border-red-200"
-                        }
-                      >
-                        {student.attendanceToday ? "حاضر" : "غائب"}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      {student.attendanceCount}/{student.totalSessions}
-                    </TableCell>
-                    <TableCell>
-                      {(
-                        (student.attendanceCount / student.totalSessions) *
-                        100
-                      ).toFixed(1)}
-                      %
-                    </TableCell>
-                    <TableCell>
-                      {new Date(student.lastAttendance).toLocaleDateString(
-                        "ar-EG"
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex gap-1">
-                        <Button
-                          size="sm"
-                          variant={
-                            student.attendanceToday ? "default" : "outline"
+                {filteredStudents.map((student) => {
+                  const stats = attendanceStats[student.id] || {
+                    totalAttendance: 0,
+                    attendanceRate: 0,
+                    lastAttendance: null,
+                  };
+                  const isPresentToday = presentIds.includes(student.id);
+
+                  return (
+                    <TableRow key={student.id}>
+                      <TableCell className="font-medium">
+                        {student.id}
+                      </TableCell>
+                      <TableCell>{student.name}</TableCell>
+                      <TableCell>
+                        {student.group_name || student.group}
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          className={
+                            isPresentToday
+                              ? "bg-green-100 text-green-800 border-green-200"
+                              : "bg-red-100 text-red-800 border-red-200"
                           }
-                          onClick={() => markAttendance(student.id, true)}
-                          className="h-8 px-2"
                         >
-                          <CheckCircle className="h-3 w-3" />
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant={
-                            !student.attendanceToday ? "destructive" : "outline"
-                          }
-                          onClick={() => markAttendance(student.id, false)}
-                          className="h-8 px-2"
-                        >
-                          <XCircle className="h-3 w-3" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                          {isPresentToday ? "حاضر" : "غائب"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        {stats.totalAttendance > 0
+                          ? stats.totalAttendance
+                          : "—"}
+                      </TableCell>
+                      <TableCell>
+                        {stats.attendanceRate > 0
+                          ? `${stats.attendanceRate.toFixed(1)}%`
+                          : "—"}
+                      </TableCell>
+                      <TableCell>{formatDate(stats.lastAttendance)}</TableCell>
+                      <TableCell>
+                        <div className="flex gap-1">
+                          <Button
+                            size="sm"
+                            variant={isPresentToday ? "default" : "outline"}
+                            onClick={() => markAttendance(student.id, true)}
+                            className="h-8 px-2"
+                          >
+                            <CheckCircle className="h-3 w-3" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant={
+                              !isPresentToday ? "destructive" : "outline"
+                            }
+                            onClick={() => markAttendance(student.id, false)}
+                            className="h-8 px-2"
+                          >
+                            <XCircle className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           </div>

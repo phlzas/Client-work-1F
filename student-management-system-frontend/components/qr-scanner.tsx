@@ -1,133 +1,77 @@
 "use client";
 
 import type React from "react";
+
 import { useState, useRef, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { QrCode, CheckCircle, XCircle, Loader2 } from "lucide-react";
+import { QrCode, CheckCircle, XCircle } from "lucide-react";
 import { useKeyboardNavigation } from "@/hooks/useKeyboardNavigation";
 import { useAccessibility } from "@/components/accessibility-provider";
 import { ariaLabels } from "@/lib/accessibility";
 
-// Constants for timing controls
-const SCAN_DEBOUNCE_MS = 1000; // Minimum time between scans
-const AUTO_CLEAR_MS = 5000; // Auto-clear timeout for messages
-const FOCUS_CHECK_MS = 100; // Focus check interval
-
 interface QRScannerProps {
-  onScan: (studentId: string) => Promise<void>;
-  result?: string;
-  error?: string;
+  onScan: (studentId: string) => void;
+  result: string;
 }
 
-export function QRScanner({ onScan, result, error }: QRScannerProps) {
+export function QRScanner({ onScan, result }: QRScannerProps) {
   const [input, setInput] = useState("");
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [lastScanTime, setLastScanTime] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
-  const cleanupTimeoutRef = useRef<number | undefined>(undefined);
-  const focusIntervalRef = useRef<number | undefined>(undefined);
   const { announce } = useAccessibility();
 
+  // Keyboard navigation setup
   const { containerRef } = useKeyboardNavigation({
+    // Keep autofocus only when scanner is visible as the primary tool
     autoFocus: true,
     enableEnterKey: true,
     enableEscapeKey: true,
     onEnter: (event) => {
       event.preventDefault();
-      handleScan(input);
+      if (input.trim()) {
+        onScan(input.trim());
+        setInput("");
+      }
     },
     onEscape: (event) => {
       event.preventDefault();
       setInput("");
-      inputRef.current?.focus();
+      if (inputRef.current) {
+        inputRef.current.focus();
+      }
     },
   });
 
-  const handleScan = async (value: string) => {
-    const now = Date.now();
-    const trimmedValue = value.trim();
-
-    if (!trimmedValue) return;
-
-    if (isProcessing) {
-      announce(ariaLabels.scanInProgress);
-      return;
-    }
-
-    if (now - lastScanTime < SCAN_DEBOUNCE_MS) {
-      announce(ariaLabels.scanTooQuick);
-      return;
-    }
-
-    try {
-      setIsProcessing(true);
-      setLastScanTime(now);
-      announce(ariaLabels.scanningQRCode);
-
-      await onScan(trimmedValue);
-      setInput("");
-
-      // Schedule cleanup
-      if (cleanupTimeoutRef.current) {
-        window.clearTimeout(cleanupTimeoutRef.current);
-      }
-
-      cleanupTimeoutRef.current = window.setTimeout(() => {
-        inputRef.current?.focus();
-      }, AUTO_CLEAR_MS);
-    } catch (err) {
-      console.error("QR Scan error:", err);
-      announce(ariaLabels.scanError);
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
   useEffect(() => {
-    const maintainFocus = () => {
-      if (inputRef.current && document.activeElement !== inputRef.current) {
-        inputRef.current.focus();
-      }
-    };
-
-    maintainFocus(); // Initial focus
-    focusIntervalRef.current = window.setInterval(
-      maintainFocus,
-      FOCUS_CHECK_MS
-    );
-
-    return () => {
-      if (focusIntervalRef.current) {
-        window.clearInterval(focusIntervalRef.current);
-      }
-      if (cleanupTimeoutRef.current) {
-        window.clearTimeout(cleanupTimeoutRef.current);
-      }
-    };
+    // Focus input when component mounts, but don't hijack focus continuously
+    if (inputRef.current) {
+      inputRef.current.focus();
+    }
   }, []);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    handleScan(input);
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      handleScan(input);
-    } else if (e.key === "Escape") {
-      e.preventDefault();
+    if (input.trim()) {
+      announce(`جاري مسح رمز الطالب: ${input.trim()}`);
+      onScan(input.trim());
       setInput("");
     }
   };
 
   const handleBlur = () => {
-    // Immediately refocus on blur
-    window.requestAnimationFrame(() => {
-      inputRef.current?.focus();
-    });
+    // Do not forcibly refocus; allow users to interact with other UI (forms/modals)
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    // Handle specific keys for QR scanner
+    if (e.key === "Enter") {
+      e.preventDefault();
+      handleSubmit(e);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      setInput("");
+    }
   };
 
   return (
@@ -136,57 +80,64 @@ export function QRScanner({ onScan, result, error }: QRScannerProps) {
       ref={containerRef as React.RefObject<HTMLDivElement>}
     >
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <QrCode className="h-5 w-5" aria-hidden="true" />
-          {ariaLabels.qrScanner}
+        <CardTitle className="flex items-center gap-2" id="qr-scanner">
+          <QrCode className="h-5 w-5" />
+          مسح رمز QR للحضور
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         <form onSubmit={handleSubmit} className="flex gap-2">
-          <div className="relative flex-1">
-            <Input
-              ref={inputRef}
-              type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onBlur={handleBlur}
-              onKeyDown={handleKeyDown}
-              placeholder={ariaLabels.scanQRCodePlaceholder}
-              disabled={isProcessing}
-              className="pr-10 text-lg"
-              autoComplete="off"
-              aria-label={ariaLabels.qrCodeInput}
-            />
-            {isProcessing && (
-              <Loader2
-                className="absolute right-3 top-3 h-4 w-4 animate-spin text-muted-foreground"
+          <Input
+            ref={inputRef}
+            type="text"
+            placeholder="امسح رمز QR أو أدخل رقم الطالب..."
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onBlur={handleBlur}
+            onKeyDown={handleKeyDown}
+            className="flex-1 text-lg"
+            autoComplete="off"
+            aria-label="مسح رمز QR أو إدخال رقم الطالب"
+            aria-describedby="qr-scanner-instructions qr-scanner-result"
+          />
+        </form>
+
+        {result && (
+          <Alert
+            className={
+              result.includes("غير موجود")
+                ? "border-red-200 bg-red-50"
+                : "border-green-200 bg-green-50"
+            }
+            role="status"
+            aria-live="assertive"
+            aria-atomic="true"
+            id="qr-scanner-result"
+          >
+            {result.includes("غير موجود") ? (
+              <XCircle className="h-4 w-4 text-red-600" aria-hidden="true" />
+            ) : (
+              <CheckCircle
+                className="h-4 w-4 text-green-600"
                 aria-hidden="true"
               />
             )}
-          </div>
-        </form>
-
-        {(result || error) && (
-          <Alert
-            variant={error ? "destructive" : "default"}
-            role="status"
-            aria-live="assertive"
-          >
-            <AlertDescription className="flex items-center gap-2">
-              {error ? (
-                <>
-                  <XCircle className="h-4 w-4" aria-hidden="true" />
-                  {error}
-                </>
-              ) : (
-                <>
-                  <CheckCircle className="h-4 w-4" aria-hidden="true" />
-                  {result}
-                </>
-              )}
+            <AlertDescription
+              className={
+                result.includes("غير موجود") ? "text-red-800" : "text-green-800"
+              }
+            >
+              {result}
             </AlertDescription>
           </Alert>
         )}
+
+        <div className="text-sm text-gray-600" id="qr-scanner-instructions">
+          <p>• امسح رمز QR الخاص بالطالب أو أدخل رقم الطالب يدوياً</p>
+          <p>• اضغط Enter لتسجيل الحضور</p>
+          <p>• اضغط Escape لمسح النص المدخل</p>
+          <p>• سيتم عرض حالة الدفع بعد المسح</p>
+        </div>
       </CardContent>
     </Card>
   );

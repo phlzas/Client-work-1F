@@ -39,14 +39,9 @@ export function KeyboardNavigationProvider({
     let keyboardUsed = false;
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      // Check if event.key exists and is a string before calling startsWith
-      if (
-        event.key === "Tab" ||
-        event.key === "Enter" ||
-        (event.key &&
-          typeof event.key === "string" &&
-          event.key.startsWith("Arrow"))
-      ) {
+      const key = (event as KeyboardEvent | undefined)?.key;
+      if (!key || typeof key !== "string") return;
+      if (key === "Tab" || key === "Enter" || key.startsWith("Arrow")) {
         if (!keyboardUsed) {
           keyboardUsed = true;
           setIsKeyboardUser(true);

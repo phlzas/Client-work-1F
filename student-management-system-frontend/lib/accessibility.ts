@@ -5,108 +5,7 @@
 
 import { useEffect, useState } from "react";
 
-// ------------------------------------
-// Core ARIA Utilities
-// ------------------------------------
-
-// Counter for generating unique ARIA IDs
-let ariaIdCounter = 0;
-
-// Generate unique ARIA IDs
-export function generateAriaId(prefix: string = "aria"): string {
-  return `${prefix}-${++ariaIdCounter}`;
-}
-
-// ------------------------------------
-// ARIA Labels and Constants
-// ------------------------------------
-
-// Unified aria labels for the entire application
-export const ariaLabels = {
-  // Navigation
-  mainNavigation: "القائمة الرئيسية",
-  breadcrumb: "شريط التنقل",
-  pagination: "التنقل بين الصفحات",
-  required: "حقل مطلوب",
-  optional: "حقل اختياري",
-  invalid: "إدخال غير صالح",
-  valid: "إدخال صالح",
-
-  // Dynamic labels
-  edit: (name: string) => `تعديل ${name}`,
-  delete: (name: string) => `حذف ${name}`,
-  add: (type: string) => `إضافة ${type}`,
-  view: (name: string) => `عرض ${name}`,
-  status: (state: string) => `الحالة: ${state}`,
-
-  // QR Scanner specific labels
-  qrScanner: "مسح رمز QR للحضور",
-  qrCodeInput: "مسح رمز QR أو إدخال رقم الطالب",
-  scanQRCodePlaceholder: "امسح رمز QR أو أدخل رقم الطالب...",
-  scanInProgress: "جاري مسح الرمز، برجاء الانتظار",
-  scanTooQuick: "برجاء الانتظار قبل المسح مرة أخرى",
-  scanningQRCode: "جاري مسح رمز الطالب",
-  scanError: "حدث خطأ أثناء المسح",
-
-  // Student management labels
-  studentId: "رقم الطالب",
-  studentName: "اسم الطالب",
-  studentGroup: "المجموعة",
-  paymentStatus: "حالة الدفع",
-  attendanceLog: "سجل الحضور",
-  searchStudents: "البحث عن طلاب",
-  filterBy: (filter: string) => `تصفية حسب ${filter}`,
-
-  // Form controls
-  submit: "تأكيد",
-  cancel: "إلغاء",
-  clear: "مسح",
-  search: "بحث",
-  filter: "تصفية",
-  sort: "ترتيب",
-  close: "إغلاق",
-  back: "رجوع",
-  next: "التالي",
-  previous: "السابق",
-
-  // Navigation
-  goToPage: (page: string) => `الذهاب إلى ${page}`,
-  currentPage: "الصفحة الحالية",
-  firstPage: "الصفحة الأولى",
-  lastPage: "الصفحة الأخيرة",
-
-  // Error messages
-  errorOccurred: "حدث خطأ",
-  tryAgain: "حاول مرة أخرى",
-  invalidInput: "إدخال غير صالح",
-  requiredField: "هذا الحقل مطلوب",
-
-  // Success messages
-  success: "تمت العملية بنجاح",
-  saved: "تم الحفظ",
-  updated: "تم التحديث",
-  deleted: "تم الحذف",
-
-  // Loading states
-  loading: "جاري التحميل",
-  processing: "جاري المعالجة",
-  saving: "جاري الحفظ",
-  deleting: "جاري الحذف",
-
-  // Data states
-  noData: "لا توجد بيانات",
-  noResults: "لا توجد نتائج",
-  empty: "فارغ",
-
-  // Search results
-  searchResults: (count: number) => {
-    if (count === 0) return "لم يتم العثور على نتائج";
-    if (count === 1) return "تم العثور على نتيجة واحدة";
-    return `تم العثور على ${count} نتائج`;
-  },
-} as const;
-
-// ARIA roles constants
+// ARIA constants
 export const ARIA_ROLES = {
   BUTTON: "button",
   DIALOG: "dialog",
@@ -133,9 +32,11 @@ export const ARIA_SORT = {
   NONE: "none",
 } as const;
 
-// ------------------------------------
-// Components and Hooks
-// ------------------------------------
+// Utility to generate unique ARIA IDs
+let ariaIdCounter = 0;
+export function generateAriaId(prefix: string = "aria"): string {
+  return `${prefix}-${++ariaIdCounter}`;
+}
 
 // ARIA live region announcer
 export class AriaAnnouncer {
@@ -253,9 +154,50 @@ export function useScreenReaderDetection() {
   return isScreenReaderActive;
 }
 
-// ------------------------------------
-// Form Field Utilities
-// ------------------------------------
+// ARIA label generators for Arabic content
+export const ariaLabels = {
+  // Navigation
+  mainNavigation: "التنقل الرئيسي",
+  breadcrumb: "مسار التنقل",
+  pagination: "ترقيم الصفحات",
+
+  // Forms
+  required: "مطلوب",
+  optional: "اختياري",
+  invalid: "غير صحيح",
+  valid: "صحيح",
+
+  // Actions
+  edit: (name: string) => `تعديل ${name}`,
+  delete: (name: string) => `حذف ${name}`,
+  add: (type: string) => `إضافة ${type}`,
+  save: "حفظ",
+  cancel: "إلغاء",
+  close: "إغلاق",
+
+  // Status
+  loading: "جاري التحميل",
+  error: "خطأ",
+  success: "نجح",
+  warning: "تحذير",
+
+  // Student management specific
+  studentGrid: "جدول الطلاب",
+  studentForm: "نموذج بيانات الطالب",
+  qrScanner: "ماسح رمز الاستجابة السريعة",
+  attendanceLog: "سجل الحضور",
+  paymentStatus: "حالة الدفع",
+
+  // Table
+  sortAscending: (column: string) => `ترتيب ${column} تصاعدي`,
+  sortDescending: (column: string) => `ترتيب ${column} تنازلي`,
+  rowSelected: (row: number) => `تم تحديد الصف ${row}`,
+
+  // Search and filters
+  searchResults: (count: number) => `${count} نتيجة بحث`,
+  noResults: "لا توجد نتائج",
+  filterBy: (filter: string) => `تصفية حسب ${filter}`,
+};
 
 /**
  * Create ARIA attributes for form fields
@@ -311,10 +253,6 @@ export function createAriaFormField({
   };
 }
 
-// ------------------------------------
-// Focus Management
-// ------------------------------------
-
 // Focus management utilities
 export class FocusManager {
   private static focusStack: HTMLElement[] = [];
@@ -369,10 +307,6 @@ export class FocusManager {
   }
 }
 
-// ------------------------------------
-// Semantic Elements
-// ------------------------------------
-
 // Semantic HTML helpers
 export const semanticElements = {
   // Create semantic landmarks
@@ -413,10 +347,6 @@ export const semanticElements = {
     "aria-live": "assertive",
   }),
 };
-
-// ------------------------------------
-// Keyboard Navigation
-// ------------------------------------
 
 // Keyboard navigation helpers
 export const keyboardHelpers = {
@@ -495,10 +425,6 @@ export const keyboardHelpers = {
   },
 };
 
-// ------------------------------------
-// Color Contrast Utilities
-// ------------------------------------
-
 // Color contrast utilities for accessibility
 export const colorHelpers = {
   // Calculate relative luminance
@@ -514,7 +440,6 @@ export const colorHelpers = {
       c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)
     );
 
-    // Calculate luminance
     return 0.2126 * sRGB[0] + 0.7152 * sRGB[1] + 0.0722 * sRGB[2];
   },
 
@@ -533,10 +458,39 @@ export const colorHelpers = {
     return level === "AA" ? ratio >= 4.5 : ratio >= 7;
   },
 };
+/**
+ * Utility to check if an element is focusable
+ */
+export function isFocusable(element: HTMLElement): boolean {
+  const focusableSelectors = [
+    "button:not([disabled])",
+    "input:not([disabled])",
+    "select:not([disabled])",
+    "textarea:not([disabled])",
+    "a[href]",
+    '[tabindex]:not([tabindex="-1"])',
+    '[contenteditable="true"]',
+  ];
 
-// ------------------------------------
-// Focus Control Hooks
-// ------------------------------------
+  return focusableSelectors.some((selector) => element.matches(selector));
+}
+
+/**
+ * Get all focusable elements within a container
+ */
+export function getFocusableElements(container: HTMLElement): HTMLElement[] {
+  const focusableSelectors = [
+    "button:not([disabled])",
+    "input:not([disabled])",
+    "select:not([disabled])",
+    "textarea:not([disabled])",
+    "a[href]",
+    '[tabindex]:not([tabindex="-1"])',
+    '[contenteditable="true"]',
+  ].join(", ");
+
+  return Array.from(container.querySelectorAll(focusableSelectors));
+}
 
 /**
  * Hook for managing focus trap in modals
@@ -591,44 +545,6 @@ export function useScreenReaderAnnouncement() {
   };
 
   return { announcement, announce };
-}
-
-// ------------------------------------
-// Focus Utilities
-// ------------------------------------
-
-/**
- * Utility to check if an element is focusable
- */
-export function isFocusable(element: HTMLElement): boolean {
-  const focusableSelectors = [
-    "button:not([disabled])",
-    "input:not([disabled])",
-    "select:not([disabled])",
-    "textarea:not([disabled])",
-    "a[href]",
-    '[tabindex]:not([tabindex="-1"])',
-    '[contenteditable="true"]',
-  ];
-
-  return focusableSelectors.some((selector) => element.matches(selector));
-}
-
-/**
- * Get all focusable elements within a container
- */
-export function getFocusableElements(container: HTMLElement): HTMLElement[] {
-  const focusableSelectors = [
-    "button:not([disabled])",
-    "input:not([disabled])",
-    "select:not([disabled])",
-    "textarea:not([disabled])",
-    "a[href]",
-    '[tabindex]:not([tabindex="-1"])',
-    '[contenteditable="true"]',
-  ].join(", ");
-
-  return Array.from(container.querySelectorAll(focusableSelectors));
 }
 
 /**

@@ -53,11 +53,15 @@ interface SettingsProps {
 // Utility function to normalize settings data
 const normalizeSettings = (settings: AppSettings): AppSettings => ({
   ...settings,
-  payment_threshold: settings.payment_threshold,
-  default_groups: settings.default_groups,
-  enable_audit_log: settings.enable_audit_log,
-  backup_encryption: settings.backup_encryption,
-  accessibility_mode: settings.accessibility_mode,
+  payment_threshold:
+    settings.payment_threshold ?? settings.paymentThreshold ?? 0,
+  default_groups: settings.default_groups ?? settings.defaultGroups ?? [],
+  enable_audit_log:
+    settings.enable_audit_log ?? settings.enableAuditLog ?? false,
+  backup_encryption:
+    settings.backup_encryption ?? settings.backupEncryption ?? false,
+  accessibility_mode:
+    settings.accessibility_mode ?? settings.accessibilityMode ?? false,
 });
 
 export function Settings({ settings, onUpdateSettings }: SettingsProps) {
@@ -359,7 +363,7 @@ export function Settings({ settings, onUpdateSettings }: SettingsProps) {
 
   // Backup management functions
   const handleCreateBackup = async () => {
-    if (localSettings.backup_encryption) {
+    if (localSettings.backup_encryption || localSettings.backupEncryption) {
       setBackupPasswordDialogOpen(true);
     } else {
       await performBackup();
@@ -373,9 +377,9 @@ export function Settings({ settings, onUpdateSettings }: SettingsProps) {
     try {
       const metadata = await BackupService.createBackup(password);
       setSaveStatus(
-        `تم إنشاء النسخة الاحتياطية بنجاح - ${BackupService.formatFileSize(
-          metadata.file_size
-        )}`
+        `تم إنشاء النسخة الاحتياطية بنجاح. الموقع: ${
+          metadata.file_path || "المجلد الحالي"
+        } — الحجم: ${BackupService.formatFileSize(metadata.file_size)}`
       );
       setTimeout(() => setSaveStatus(""), 5000);
     } catch (error) {
@@ -437,11 +441,7 @@ export function Settings({ settings, onUpdateSettings }: SettingsProps) {
           window.location.reload();
         }, 2000);
       } else {
-        setSaveError(
-          `فشل في استعادة البيانات: ${
-            result.errors?.join(", ") || result.message || "خطأ غير معروف"
-          }`
-        );
+        setSaveError(`فشل في استعادة البيانات: ${result.errors.join(", ")}`);
         setTimeout(() => setSaveError(null), 5000);
       }
     } catch (error) {
@@ -785,7 +785,11 @@ export function Settings({ settings, onUpdateSettings }: SettingsProps) {
                 </div>
                 <Switch
                   id="enableAuditLog"
-                  checked={localSettings.enable_audit_log}
+                  checked={
+                    localSettings.enable_audit_log ||
+                    localSettings.enableAuditLog ||
+                    false
+                  }
                   onCheckedChange={(checked) =>
                     updateSetting("enable_audit_log", checked)
                   }
@@ -803,11 +807,16 @@ export function Settings({ settings, onUpdateSettings }: SettingsProps) {
                 </div>
                 <Switch
                   id="backupEncryption"
-                  checked={localSettings.backup_encryption}
+                  checked={
+                    localSettings.backup_encryption ||
+                    localSettings.backupEncryption ||
+                    false
+                  }
                   onCheckedChange={(checked) =>
                     setLocalSettings({
                       ...localSettings,
                       backup_encryption: checked,
+                      backupEncryption: checked, // Keep both for compatibility
                     })
                   }
                 />
@@ -822,11 +831,16 @@ export function Settings({ settings, onUpdateSettings }: SettingsProps) {
                 </div>
                 <Switch
                   id="accessibilityMode"
-                  checked={localSettings.accessibility_mode}
+                  checked={
+                    localSettings.accessibility_mode ||
+                    localSettings.accessibilityMode ||
+                    false
+                  }
                   onCheckedChange={(checked) =>
                     setLocalSettings({
                       ...localSettings,
                       accessibility_mode: checked,
+                      accessibilityMode: checked, // Keep both for compatibility
                     })
                   }
                 />
@@ -1101,11 +1115,13 @@ export function Settings({ settings, onUpdateSettings }: SettingsProps) {
                     <AlertTriangle className="h-4 w-4" />
                     <span className="font-medium">تحذير مهم:</span>
                   </div>
-                  <p className="text-red-700 mt-1">
-                    ستؤدي هذه العملية إلى استبدال جميع البيانات الحالية
-                    بالبيانات من النسخة الاحتياطية. لا يمكن التراجع عن هذه
-                    العملية.
-                  </p>
+                  <div className="text-red-700 mt-1">
+                    <p>
+                      ستؤدي هذه العملية إلى استبدال جميع البيانات الحالية
+                      بالبيانات من النسخة الاحتياطية. لا يمكن التراجع عن هذه
+                      العملية.
+                    </p>
+                  </div>
                 </div>
                 <p>هل أنت متأكد من المتابعة؟</p>
               </div>
@@ -1156,10 +1172,12 @@ export function Settings({ settings, onUpdateSettings }: SettingsProps) {
                         <AlertTriangle className="h-4 w-4" />
                         <span className="font-medium">تحذير:</span>
                       </div>
-                      <p className="text-orange-700 mt-1">
-                        هذه المجموعة تحتوي على {groupToDelete.studentCount}{" "}
-                        طالب. سيتم نقل الطلاب إلى "المجموعة الأولى" تلقائياً.
-                      </p>
+                      <div className="text-orange-700 mt-1">
+                        <p>
+                          هذه المجموعة تحتوي على {groupToDelete.studentCount}{" "}
+                          طالب. سيتم نقل الطلاب إلى "المجموعة الأولى" تلقائياً.
+                        </p>
+                      </div>
                     </div>
                   ) : (
                     <p className="text-gray-600">

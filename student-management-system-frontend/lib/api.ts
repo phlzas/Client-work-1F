@@ -31,6 +31,7 @@ interface AttendanceStatistics {
   total_days: number;
   present_days: number;
   attendance_rate: number;
+  last_attendance_date?: string | null;
 }
 
 /**
@@ -1019,20 +1020,47 @@ export class ApiService {
       "Payment Status",
       "Next Due Date",
       "Enrollment Date",
-      "Created At",
+      "Attendance Count",
     ];
 
     const rows = students.map((student) => [
       student.id,
       student.name,
-      student.group_name,
-      student.payment_plan,
-      student.plan_amount.toString(),
-      student.paid_amount.toString(),
-      student.payment_status,
-      student.next_due_date || "N/A",
-      student.enrollment_date,
-      student.created_at,
+      this.getStudentProperty(student, "group_name", "group", ""),
+      this.getStudentProperty(
+        student,
+        "payment_plan",
+        "paymentPlan",
+        "one-time"
+      ),
+      this.getStudentProperty(
+        student,
+        "plan_amount",
+        "planAmount",
+        0
+      ).toString(),
+      this.getStudentProperty(
+        student,
+        "paid_amount",
+        "paidAmount",
+        0
+      ).toString(),
+      this.getStudentProperty(
+        student,
+        "payment_status",
+        "paymentStatus",
+        "pending"
+      ),
+      this.getStudentProperty(student, "next_due_date", "nextDueDate", "N/A"),
+      this.getStudentProperty(student, "enrollment_date", "enrollmentDate", ""),
+      (
+        this.getStudentProperty(
+          student,
+          "attendance_log",
+          "attendanceLog",
+          []
+        ) as any[]
+      ).length.toString(),
     ]);
 
     return [headers, ...rows]

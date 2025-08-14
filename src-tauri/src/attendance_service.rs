@@ -1,8 +1,5 @@
-use crate::{
-    audit_service::AuditService,
-    database::{Database, DatabaseError, DatabaseResult},
-    scanner_lock::ScannerLock,
-};
+use crate::audit_service::AuditService;
+use crate::database::{Database, DatabaseResult};
 use chrono::{DateTime, Local, NaiveDate, Utc};
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
@@ -20,6 +17,7 @@ pub struct AttendanceStats {
     pub total_days: i32,
     pub present_days: i32,
     pub attendance_rate: f64,
+    pub last_attendance_date: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,18 +42,15 @@ pub struct AttendanceService;
 impl AttendanceService {
     /// Mark attendance for a student on a specific date
     /// Prevents duplicate entries for the same student on the same date
-    /// Uses a transaction and scanner lock to ensure data consistency
     pub fn mark_attendance(
-        db: &mut Database,
+        db: &Database,
         student_id: &str,
         date: &str,
-    ) -> Result<AttendanceRecord, DatabaseError> {
+    ) -> DatabaseResult<AttendanceRecord> {
         // Validate date format
-        if let Err(e) = Self::validate_date_format(date) {
-            return Err(e);
-        }
+        Self::validate_date_format(date)?;
 
-        // Check if student exists before acquiring lock
+        // Check if student exists
         let student_exists: bool = db
             .connection()
             .query_row(
@@ -63,123 +58,67 @@ impl AttendanceService {
                 params![student_id],
                 |row| row.get(0),
             )
-            .map_err(|e| DatabaseError::Sqlite(e))?;
+            .map_err(|e| crate::database::DatabaseError::Sqlite(e))?;
 
         if !student_exists {
-            AuditService::log_action(
-                db,
-                "INVALID_STUDENT_ID",
-                "attendance",
-                student_id,
-                None,
-                Some(&format!(
-                    "{{\"date\": \"{}\", \"error\": \"student_not_found\"}}",
-                    date
-                )),
-                None,
-            )?;
-            return Err(DatabaseError::Migration(format!(
+            return Err(crate::database::DatabaseError::Migration(format!(
                 "Student with ID '{}' does not exist",
                 student_id
             )));
         }
 
-        // Check for existing attendance before acquiring lock
-        let exists: bool = db
+        // Check if attendance already exists for this student on this date
+        let existing_count: i32 = db
             .connection()
             .query_row(
-                "SELECT COUNT(*) > 0 FROM attendance WHERE student_id = ? AND date = ?",
+                "SELECT COUNT(*) FROM attendance WHERE student_id = ?1 AND date = ?2",
                 params![student_id, date],
                 |row| row.get(0),
             )
-            .map_err(|e| DatabaseError::Sqlite(e))?;
+            .map_err(|e| crate::database::DatabaseError::Sqlite(e))?;
 
-        if exists {
-            AuditService::log_action(
-                db,
-                "DUPLICATE_ATTENDANCE_ATTEMPT",
-                "attendance",
-                student_id,
-                None,
-                Some(&format!(
-                    "{{\"date\": \"{}\", \"error\": \"duplicate\"}}",
-                    date
-                )),
-                None,
-            )?;
-            return Err(DatabaseError::Migration(
-                "Attendance already marked for this date".to_string(),
-            ));
+        if existing_count > 0 {
+            return Err(crate::database::DatabaseError::Migration(format!(
+                "Attendance already recorded for student '{}' on date '{}'",
+                student_id, date
+            )));
         }
 
-        // Try to acquire scanner lock
-        if ScannerLock::acquire_with_timeout(std::time::Duration::from_secs(5))
-            .map_err(|e| DatabaseError::Connection(e))?
-        {
-            // Start transaction once we have the lock
-            let tx = db.connection_mut().transaction()?;
+        // Insert attendance record
+        let mut stmt = db.connection().prepare(
+            "INSERT INTO attendance (student_id, date) VALUES (?1, ?2) RETURNING id, student_id, date, created_at"
+        ).map_err(|e| crate::database::DatabaseError::Sqlite(e))?;
 
-            // Insert attendance record within transaction
-            tx.execute(
-                "INSERT INTO attendance (student_id, date, created_at) VALUES (?1, ?2, ?3)",
-                params![student_id, date, Utc::now()],
-            )
-            .map_err(|e| {
-                ScannerLock::record_error().ok();
-                DatabaseError::Sqlite(e)
-            })?;
-
-            // Get the inserted record
-            let record = tx.query_row(
-                "SELECT id, student_id, date, created_at FROM attendance WHERE student_id = ?1 AND date = ?2",
-                params![student_id, date],
-                |row| Ok(AttendanceRecord {
+        let attendance_record = stmt
+            .query_row(params![student_id, date], |row| {
+                Ok(AttendanceRecord {
                     id: row.get(0)?,
                     student_id: row.get(1)?,
                     date: row.get(2)?,
                     created_at: row.get(3)?,
-                }),
-            )
-            .map_err(|e| {
-                ScannerLock::record_error().ok();
-                DatabaseError::Sqlite(e)
-            })?;
+                })
+            })
+            .map_err(|e| crate::database::DatabaseError::Sqlite(e))?;
 
-            // Commit transaction and release lock
-            tx.commit()?;
-            ScannerLock::release().ok();
-
-            // Log successful attendance after transaction is committed
-            AuditService::log_action(
+        // Log audit entry for attendance creation
+        if let Ok(serialized_data) = AuditService::serialize_data(&attendance_record) {
+            let _ = AuditService::log_create(
                 db,
-                "MARK_ATTENDANCE",
                 "attendance",
-                &record.id.to_string(),
+                &attendance_record.id.to_string(),
+                &serialized_data,
                 None,
-                Some(&format!(
-                    "{{\"student_id\": \"{}\", \"date\": \"{}\"}}",
-                    student_id, date
-                )),
-                None,
-            )?;
-
-            Ok(record)
-        } else {
-            Err(DatabaseError::Connection(
-                "Failed to acquire scanner lock".to_string(),
-            ))
+            );
         }
+
+        log::info!(
+            "Marked attendance for student '{}' on date '{}'",
+            student_id,
+            date
+        );
+        Ok(attendance_record)
     }
 
-    /// Validate date format (YYYY-MM-DD)
-    pub fn validate_date_format(date: &str) -> Result<(), DatabaseError> {
-        if let Err(_) = NaiveDate::parse_from_str(date, "%Y-%m-%d") {
-            return Err(DatabaseError::Migration(
-                "Invalid date format. Use YYYY-MM-DD".to_string(),
-            ));
-        }
-        Ok(())
-    }
     /// Check if attendance is already recorded for a student today
     pub fn check_attendance_today(db: &Database, student_id: &str) -> DatabaseResult<bool> {
         let today = Self::get_current_date();
@@ -364,10 +303,20 @@ impl AttendanceService {
             0.0
         };
 
+        let last_attendance_date: Option<String> = db
+            .connection()
+            .query_row(
+                "SELECT date FROM attendance WHERE student_id = ?1{} ORDER BY date DESC LIMIT 1",
+                &params_refs[..],
+                |row| Ok(row.get(0)?),
+            )
+            .ok();
+
         Ok(AttendanceStats {
             total_days,
             present_days,
             attendance_rate,
+            last_attendance_date,
         })
     }
 
@@ -457,11 +406,7 @@ impl AttendanceService {
         let mut summaries = Vec::new();
 
         for date in dates {
-            let summary = Self::get_daily_attendance_summary(
-                db,
-                &date,
-                group_name.map(|s| s.to_string()).as_deref(),
-            )?;
+            let summary = Self::get_daily_attendance_summary(db, &date, group_name)?;
             summaries.push(summary);
         }
 
@@ -525,10 +470,10 @@ impl AttendanceService {
     }
 
     /// Validate date format (YYYY-MM-DD)
-    pub fn validate_and_format_date(date: &str) -> Result<String, DatabaseError> {
+    pub fn validate_date_format(date: &str) -> DatabaseResult<()> {
         match NaiveDate::parse_from_str(date, "%Y-%m-%d") {
-            Ok(_) => Ok(date.to_string()),
-            Err(_) => Err(DatabaseError::Migration(format!(
+            Ok(_) => Ok(()),
+            Err(_) => Err(crate::database::DatabaseError::Migration(format!(
                 "Invalid date format '{}'. Expected format: YYYY-MM-DD",
                 date
             ))),
@@ -538,7 +483,7 @@ impl AttendanceService {
     /// Format date from various formats to YYYY-MM-DD
     pub fn format_date(date_str: &str) -> DatabaseResult<String> {
         // Try different date formats
-        let formats: [&str; 5] = [
+        let formats = [
             "%Y-%m-%d", // 2024-01-15
             "%d/%m/%Y", // 15/01/2024
             "%m/%d/%Y", // 01/15/2024
@@ -629,10 +574,10 @@ mod tests {
 
     #[test]
     fn test_mark_attendance_success() {
-        let (mut db, _temp_dir) = setup_test_db();
+        let (db, _temp_dir) = setup_test_db();
         create_test_student(&db, "student1", "Test Student", "Group A");
 
-        let result = AttendanceService::mark_attendance(&mut db, "student1", "2024-01-15");
+        let result = AttendanceService::mark_attendance(&db, "student1", "2024-01-15");
         assert!(result.is_ok());
 
         let record = result.unwrap();
@@ -642,15 +587,15 @@ mod tests {
 
     #[test]
     fn test_mark_attendance_duplicate_prevention() {
-        let (mut db, _temp_dir) = setup_test_db();
+        let (db, _temp_dir) = setup_test_db();
         create_test_student(&db, "student1", "Test Student", "Group A");
 
         // First attendance should succeed
-        let result1 = AttendanceService::mark_attendance(&mut db, "student1", "2024-01-15");
+        let result1 = AttendanceService::mark_attendance(&db, "student1", "2024-01-15");
         assert!(result1.is_ok());
 
         // Second attendance on same date should fail
-        let result2 = AttendanceService::mark_attendance(&mut db, "student1", "2024-01-15");
+        let result2 = AttendanceService::mark_attendance(&db, "student1", "2024-01-15");
         assert!(result2.is_err());
         assert!(result2
             .unwrap_err()
@@ -660,9 +605,9 @@ mod tests {
 
     #[test]
     fn test_mark_attendance_nonexistent_student() {
-        let (mut db, _temp_dir) = setup_test_db();
+        let (db, _temp_dir) = setup_test_db();
 
-        let result = AttendanceService::mark_attendance(&mut db, "nonexistent", "2024-01-15");
+        let result = AttendanceService::mark_attendance(&db, "nonexistent", "2024-01-15");
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("does not exist"));
     }
@@ -695,9 +640,9 @@ mod tests {
         create_test_student(&db, "student2", "Test Student 2", "Group B");
 
         // Mark attendance for different dates
-        AttendanceService::mark_attendance(&mut db, "student1", "2024-01-15").unwrap();
-        AttendanceService::mark_attendance(&mut db, "student1", "2024-01-16").unwrap();
-        AttendanceService::mark_attendance(&mut db, "student2", "2024-01-15").unwrap();
+        AttendanceService::mark_attendance(&db, "student1", "2024-01-15").unwrap();
+        AttendanceService::mark_attendance(&db, "student1", "2024-01-16").unwrap();
+        AttendanceService::mark_attendance(&db, "student2", "2024-01-15").unwrap();
 
         // Get all attendance
         let all_attendance = AttendanceService::get_attendance_history(&db, None).unwrap();
@@ -720,12 +665,12 @@ mod tests {
 
     #[test]
     fn test_get_student_attendance_stats() {
-        let (mut db, _temp_dir) = setup_test_db();
+        let (db, _temp_dir) = setup_test_db();
         create_test_student(&db, "student1", "Test Student", "Group A");
 
         // Mark attendance for some days
-        AttendanceService::mark_attendance(&mut db, "student1", "2024-01-15").unwrap();
-        AttendanceService::mark_attendance(&mut db, "student1", "2024-01-16").unwrap();
+        AttendanceService::mark_attendance(&db, "student1", "2024-01-15").unwrap();
+        AttendanceService::mark_attendance(&db, "student1", "2024-01-16").unwrap();
 
         let stats = AttendanceService::get_student_attendance_stats(
             &db,
@@ -789,8 +734,8 @@ mod tests {
         create_test_student(&db, "student3", "Test Student 3", "Group B");
 
         // Mark attendance for some students
-        AttendanceService::mark_attendance(&mut db, "student1", "2024-01-15").unwrap();
-        AttendanceService::mark_attendance(&mut db, "student2", "2024-01-15").unwrap();
+        AttendanceService::mark_attendance(&db, "student1", "2024-01-15").unwrap();
+        AttendanceService::mark_attendance(&db, "student2", "2024-01-15").unwrap();
 
         let summary =
             AttendanceService::get_daily_attendance_summary(&db, "2024-01-15", None).unwrap();
@@ -810,11 +755,11 @@ mod tests {
 
     #[test]
     fn test_delete_attendance() {
-        let (mut db, _temp_dir) = setup_test_db();
+        let (db, _temp_dir) = setup_test_db();
         create_test_student(&db, "student1", "Test Student", "Group A");
 
         // Mark attendance
-        AttendanceService::mark_attendance(&mut db, "student1", "2024-01-15").unwrap();
+        AttendanceService::mark_attendance(&db, "student1", "2024-01-15").unwrap();
 
         // Verify attendance exists
         assert!(

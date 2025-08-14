@@ -1,8 +1,6 @@
 import type {
   Student,
-  BaseStudent,
   AttendanceRecord,
-  BaseAttendanceRecord,
   PaymentTransaction,
   AppSettings,
   StudentFormData,
@@ -13,28 +11,26 @@ import type {
  * and frontend format (camelCase) for UI compatibility
  */
 
-export function transformStudentForUI(student: Student): Student & {
-  group: string;
-  paymentStatus: string;
-  paidAmount: number;
-  planAmount: number;
-  paymentPlan: string;
-  nextDueDate: string | null;
-  installmentCount?: number;
-} {
+export function transformStudentForUI(student: Student): Student {
   if (!student) {
     throw new Error("Student data is required for transformation");
   }
 
   return {
     ...student,
-    group: student.group_name,
-    paymentStatus: student.payment_status,
-    paidAmount: student.paid_amount,
-    planAmount: student.plan_amount,
-    paymentPlan: student.payment_plan,
-    nextDueDate: student.next_due_date,
+    // Add camelCase aliases for UI compatibility
+    group: student.group_name || "",
+    paymentPlan: student.payment_plan || "one-time",
+    planAmount: student.plan_amount || 0,
     installmentCount: student.installment_count,
+    paidAmount: student.paid_amount || 0,
+    enrollmentDate: student.enrollment_date || "",
+    nextDueDate: student.next_due_date,
+    paymentStatus: student.payment_status || "pending",
+    attendanceLog: student.attendance_log?.map(transformAttendanceForUI) || [],
+    paymentHistory: student.payment_history?.map(transformPaymentForUI) || [],
+    createdAt: student.created_at || "",
+    updatedAt: student.updated_at || "",
   };
 }
 
@@ -43,10 +39,11 @@ export function transformStudentsForUI(students: Student[]): Student[] {
 }
 
 export function transformAttendanceForUI(
-  attendance: BaseAttendanceRecord
+  attendance: AttendanceRecord
 ): AttendanceRecord {
   return {
     ...attendance,
+    // Add camelCase aliases for UI compatibility
     studentId: attendance.student_id,
     createdAt: attendance.created_at,
   };
@@ -58,18 +55,12 @@ export function transformAttendanceListForUI(
   return attendanceList.map(transformAttendanceForUI);
 }
 
-export type PaymentTransactionUI = PaymentTransaction & {
-  studentId?: string;
-  paymentDate?: string;
-  paymentMethod?: string;
-  createdAt?: string;
-};
-
 export function transformPaymentForUI(
   payment: PaymentTransaction
-): PaymentTransactionUI {
+): PaymentTransaction {
   return {
     ...payment,
+    // Add camelCase aliases for UI compatibility
     studentId: payment.student_id,
     paymentDate: payment.payment_date,
     paymentMethod: payment.payment_method,
@@ -83,14 +74,7 @@ export function transformPaymentListForUI(
   return payments.map(transformPaymentForUI);
 }
 
-export function transformSettingsForUI(settings: AppSettings): AppSettings & {
-  paymentThreshold: number;
-  defaultGroups: string[];
-  enableAuditLog: boolean;
-  enableMultiUser: boolean;
-  backupEncryption: boolean;
-  accessibilityMode: boolean;
-} {
+export function transformSettingsForUI(settings: AppSettings): AppSettings {
   return {
     ...settings,
     // Add camelCase aliases for UI compatibility
@@ -135,47 +119,20 @@ export function createStudentForBackend(studentData: {
 }
 
 // Normalize mixed format data to consistent backend format
-export function normalizeStudentData(data: any): StudentFormData & {
-  payment_status: "paid" | "pending" | "overdue" | "due_soon";
-} {
-  // Ensure numeric fields are properly converted with fallbacks
-  const planAmount = Math.max(
-    0,
-    typeof data.plan_amount !== "undefined"
-      ? Number(data.plan_amount) || 0
-      : typeof data.planAmount !== "undefined"
-      ? Number(data.planAmount) || 0
-      : 0
-  );
-
-  const paidAmount = Math.max(
-    0,
-    typeof data.paid_amount !== "undefined"
-      ? Number(data.paid_amount) || 0
-      : typeof data.paidAmount !== "undefined"
-      ? Number(data.paidAmount) || 0
-      : 0
-  );
-
-  const installmentCount =
-    typeof data.installment_count !== "undefined"
-      ? Number(data.installment_count) || undefined
-      : typeof data.installmentCount !== "undefined"
-      ? Number(data.installmentCount) || undefined
-      : undefined;
-
+export function normalizeStudentData(data: any): StudentFormData {
   return {
     name: data.name || "",
     group_name: data.group_name || data.group || "",
     payment_plan: data.payment_plan || data.paymentPlan || "one-time",
-    plan_amount: planAmount,
-    installment_count: installmentCount,
-    paid_amount: paidAmount,
+    plan_amount: data.plan_amount ?? data.planAmount ?? 0,
+    installment_count: data.installment_count || data.installmentCount,
+    paid_amount: data.paid_amount ?? data.paidAmount ?? 0,
     enrollment_date:
       data.enrollment_date ||
       data.enrollmentDate ||
       new Date().toISOString().split("T")[0],
     payment_status: data.payment_status || data.paymentStatus || "pending",
+    next_due_date: data.next_due_date || data.nextDueDate,
   };
 }
 
@@ -204,28 +161,33 @@ export function createSettingsForBackend(settingsData: {
 }
 
 // Validation helpers
-export function validateStudentData(student: Partial<BaseStudent>): string[] {
+export function validateStudentData(student: Partial<Student>): string[] {
   const errors: string[] = [];
 
   if (!student.name?.trim()) {
     errors.push("اسم الطالب مطلوب");
   }
 
-  if (!student.group_name?.trim()) {
+  if (!student.group_name?.trim() && !student.group?.trim()) {
     errors.push("المجموعة مطلوبة");
   }
 
-  if (!student.plan_amount || student.plan_amount <= 0) {
+  const planAmount = student.plan_amount || student.planAmount;
+  if (!planAmount || planAmount <= 0) {
     errors.push("مبلغ الخطة يجب أن يكون أكبر من صفر");
   }
 
-  if (student.paid_amount !== undefined && student.paid_amount < 0) {
+  const paidAmount = student.paid_amount || student.paidAmount;
+  if (paidAmount !== undefined && paidAmount < 0) {
     errors.push("المبلغ المدفوع لا يمكن أن يكون سالباً");
   }
 
+  const paymentPlan = student.payment_plan || student.paymentPlan;
+  const installmentCount =
+    student.installment_count || student.installmentCount;
   if (
-    student.payment_plan === "installment" &&
-    (!student.installment_count || student.installment_count <= 0)
+    paymentPlan === "installment" &&
+    (!installmentCount || installmentCount <= 0)
   ) {
     errors.push("عدد الأقساط مطلوب للخطط المقسطة");
   }

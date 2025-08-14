@@ -37,6 +37,18 @@ export function AccessibilityProvider({
   children,
 }: AccessibilityProviderProps) {
   const { isHighContrast, toggleHighContrast } = useHighContrastMode();
+  // Simple dark mode preference sync with high-contrast for now
+  React.useEffect(() => {
+    try {
+      const theme =
+        localStorage.getItem("theme") || (isHighContrast ? "dark" : "light");
+      if (theme === "dark") {
+        document.documentElement.classList.add("dark");
+      } else {
+        document.documentElement.classList.remove("dark");
+      }
+    } catch {}
+  }, [isHighContrast]);
   const isScreenReaderActive = useScreenReaderDetection();
   const [announcer] = useState(() => AriaAnnouncer.getInstance());
 

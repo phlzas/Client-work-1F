@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback, useRef, useEffect } from "react";
+import { useState, useMemo, useCallback, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
@@ -52,22 +52,7 @@ export function StudentGrid({
       console.warn("StudentGrid: students prop is not an array:", students);
       return [];
     }
-
-    try {
-      return students.map((student) => ({
-        ...student,
-        group: student.group_name,
-        paymentStatus: student.payment_status,
-        paidAmount: student.paid_amount,
-        planAmount: student.plan_amount,
-        paymentPlan: student.payment_plan,
-        nextDueDate: student.next_due_date,
-        installmentCount: student.installment_count,
-      }));
-    } catch (error) {
-      console.error("Error transforming student data:", error);
-      return [];
-    }
+    return transformStudentsForUI(students);
   }, [students]);
 
   const getRowClassName = useCallback((status: string) => {
@@ -122,15 +107,8 @@ export function StudentGrid({
   });
 
   // Debounced search to improve performance
-  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState(searchTerm);
-
-  // Debounce search term updates
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedSearchTerm(searchTerm);
-    }, 300);
-
-    return () => clearTimeout(timer);
+  const debouncedSearchTerm = useMemo(() => {
+    return searchTerm; // Simple implementation - could be enhanced with actual debouncing
   }, [searchTerm]);
 
   const filteredStudents = useMemo(() => {
@@ -163,10 +141,7 @@ export function StudentGrid({
   );
 
   return (
-    <Card
-      ref={containerRef as React.RefObject<HTMLDivElement>}
-      className="w-full"
-    >
+    <Card ref={containerRef as React.RefObject<HTMLDivElement>}>
       <CardHeader>
         <div className="flex justify-between items-center">
           <CardTitle id="student-grid">قائمة الطلاب</CardTitle>
@@ -227,153 +202,108 @@ export function StudentGrid({
         </div>
       </CardHeader>
 
-      <CardContent className="max-w-full">
-        <div className="w-full overflow-x-auto max-w-full">
-          <div className="rounded-md border w-full">
-            <Table
-              ref={tableRef}
-              role="table"
-              aria-label="جدول الطلاب"
-              className="w-full table-auto sm:table-fixed"
-            >
-              <TableHeader>
-                <TableRow role="row">
-                  <TableHead
-                    className="text-right w-24 min-w-20"
-                    role="columnheader"
-                  >
-                    رقم الطالب
-                  </TableHead>
-                  <TableHead
-                    className="text-right w-32 min-w-28"
-                    role="columnheader"
-                  >
-                    الاسم
-                  </TableHead>
-                  <TableHead
-                    className="text-right w-28 min-w-24"
-                    role="columnheader"
-                  >
-                    المجموعة
-                  </TableHead>
-                  <TableHead
-                    className="text-right w-24 min-w-20"
-                    role="columnheader"
-                  >
-                    خطة الدفع
-                  </TableHead>
-                  <TableHead
-                    className="text-right w-32 min-w-28"
-                    role="columnheader"
-                  >
-                    المبلغ المدفوع
-                  </TableHead>
-                  <TableHead
-                    className="text-right w-24 min-w-20"
-                    role="columnheader"
-                  >
-                    حالة الدفع
-                  </TableHead>
-                  <TableHead
-                    className="text-right w-28 min-w-24"
-                    role="columnheader"
-                  >
-                    تاريخ الاستحقاق
-                  </TableHead>
-                  <TableHead
-                    className="text-right w-20 min-w-16"
-                    role="columnheader"
-                  >
-                    الإجراءات
-                  </TableHead>
+      <CardContent>
+        <div className="rounded-md border">
+          <Table ref={tableRef} role="table" aria-label="جدول الطلاب">
+            <TableHeader>
+              <TableRow role="row">
+                <TableHead className="text-right" role="columnheader">
+                  رقم الطالب
+                </TableHead>
+                <TableHead className="text-right" role="columnheader">
+                  الاسم
+                </TableHead>
+                <TableHead className="text-right" role="columnheader">
+                  المجموعة
+                </TableHead>
+                <TableHead className="text-right" role="columnheader">
+                  خطة الدفع
+                </TableHead>
+                <TableHead className="text-right" role="columnheader">
+                  المبلغ المدفوع
+                </TableHead>
+                <TableHead className="text-right" role="columnheader">
+                  حالة الدفع
+                </TableHead>
+                <TableHead className="text-right" role="columnheader">
+                  تاريخ الاستحقاق
+                </TableHead>
+                <TableHead className="text-right" role="columnheader">
+                  الإجراءات
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filteredStudents.map((student, index) => (
+                <TableRow
+                  key={student.id}
+                  className={`${getRowClassName(student.paymentStatus!)} ${
+                    selectedRowIndex === index
+                      ? "ring-2 ring-blue-500 bg-blue-50"
+                      : ""
+                  }`}
+                  role="row"
+                  tabIndex={0}
+                  aria-selected={selectedRowIndex === index}
+                  onFocus={() => setSelectedRowIndex(index)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      onEditStudent(student);
+                    }
+                  }}
+                >
+                  <TableCell className="font-medium" role="cell">
+                    {student.id}
+                  </TableCell>
+                  <TableCell role="cell">{student.name}</TableCell>
+                  <TableCell role="cell">{student.group}</TableCell>
+                  <TableCell role="cell">
+                    {getPaymentPlanText(student.paymentPlan!)}
+                  </TableCell>
+                  <TableCell role="cell">
+                    {formatCurrency(student.paidAmount!)} /{" "}
+                    {formatCurrency(student.planAmount!)}
+                  </TableCell>
+                  <TableCell role="cell">
+                    <Badge
+                      className={getPaymentStatusColor(student.paymentStatus!)}
+                    >
+                      {getPaymentStatusText(student.paymentStatus!)}
+                    </Badge>
+                  </TableCell>
+                  <TableCell role="cell">
+                    {student.nextDueDate
+                      ? new Date(student.nextDueDate).toLocaleDateString(
+                          "ar-EG"
+                        )
+                      : "-"}
+                  </TableCell>
+                  <TableCell role="cell">
+                    <div className="flex gap-2">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => onEditStudent(student)}
+                        aria-label={`تعديل بيانات الطالب ${student.name}`}
+                      >
+                        <Edit className="h-4 w-4" aria-hidden="true" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => onDeleteStudent(student)}
+                        aria-label={`حذف الطالب ${student.name}`}
+                        className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                      >
+                        <Trash2 className="h-4 w-4" aria-hidden="true" />
+                      </Button>
+                    </div>
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredStudents.map((student, index) => (
-                  <TableRow
-                    key={student.id}
-                    className={`${getRowClassName(
-                      student.paymentStatus || "unknown"
-                    )} ${
-                      selectedRowIndex === index
-                        ? "ring-2 ring-blue-500 bg-blue-50"
-                        : ""
-                    }`}
-                    role="row"
-                    tabIndex={0}
-                    aria-selected={selectedRowIndex === index}
-                    onFocus={() => setSelectedRowIndex(index)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        onEditStudent(student);
-                      }
-                    }}
-                  >
-                    <TableCell className="font-medium" role="cell">
-                      {student.id}
-                    </TableCell>
-                    <TableCell role="cell">{student.name}</TableCell>
-                    <TableCell role="cell">{student.group}</TableCell>
-                    <TableCell role="cell">
-                      {student.paymentPlan
-                        ? getPaymentPlanText(student.paymentPlan)
-                        : "-"}
-                    </TableCell>
-                    <TableCell role="cell">
-                      {student.paidAmount !== undefined &&
-                      student.planAmount !== undefined
-                        ? `${formatCurrency(
-                            student.paidAmount
-                          )} / ${formatCurrency(student.planAmount)}`
-                        : "-"}
-                    </TableCell>
-                    <TableCell role="cell">
-                      {student.paymentStatus ? (
-                        <Badge
-                          className={getPaymentStatusColor(
-                            student.paymentStatus
-                          )}
-                        >
-                          {getPaymentStatusText(student.paymentStatus)}
-                        </Badge>
-                      ) : (
-                        <Badge variant="secondary">غير محدد</Badge>
-                      )}
-                    </TableCell>
-                    <TableCell role="cell">
-                      {student.nextDueDate
-                        ? new Date(student.nextDueDate).toLocaleDateString(
-                            "ar-EG"
-                          )
-                        : "-"}
-                    </TableCell>
-                    <TableCell role="cell">
-                      <div className="flex gap-2">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => onEditStudent(student)}
-                          aria-label={`تعديل بيانات الطالب ${student.name}`}
-                        >
-                          <Edit className="h-4 w-4" aria-hidden="true" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => onDeleteStudent(student)}
-                          aria-label={`حذف الطالب ${student.name}`}
-                          className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                        >
-                          <Trash2 className="h-4 w-4" aria-hidden="true" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+              ))}
+            </TableBody>
+          </Table>
         </div>
 
         {filteredStudents.length === 0 && (

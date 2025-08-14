@@ -7,12 +7,10 @@ import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
-  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-// Remove duplicate imports
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { Student, AppSettings, StudentFormData } from "@/types";
 import {
@@ -20,14 +18,10 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogDescription,
 } from "@/components/ui/dialog";
 import { useGroups } from "@/hooks/useGroups";
 import { usePaymentSettings } from "@/hooks/usePaymentSettings";
-import {
-  validateStudentData,
-  normalizeStudentData,
-} from "@/lib/data-transform";
+import { validateStudentData } from "@/lib/data-transform";
 import QRCodeDisplay from "@/components/qr-code-display";
 import { useKeyboardNavigation } from "@/hooks/useKeyboardNavigation";
 import { useAccessibility } from "@/components/accessibility-provider";
@@ -141,60 +135,6 @@ export function StudentForm({ student, onSubmit, onClose }: StudentFormProps) {
     isDirty: false,
   });
 
-  // Initialize form state from student data when available
-  useEffect(() => {
-    if (student) {
-      setFormState((prev) => ({
-        ...prev,
-        data: {
-          name: student.name,
-          group: student.group_name || "",
-          paymentPlan: student.payment_plan,
-          planAmount:
-            typeof student.plan_amount === "number"
-              ? student.plan_amount
-              : typeof student.plan_amount === "string"
-              ? parseInt(student.plan_amount, 10)
-              : 0,
-          installmentCount:
-            typeof student.installment_count === "number"
-              ? student.installment_count
-              : typeof student.installment_count === "string"
-              ? parseInt(student.installment_count, 10)
-              : 3,
-          paidAmount:
-            typeof student.paid_amount === "number"
-              ? student.paid_amount
-              : typeof student.paid_amount === "string"
-              ? parseInt(student.paid_amount, 10)
-              : 0,
-          enrollmentDate: student.enrollment_date,
-          paymentStatus: student.payment_status,
-        },
-        isDirty: false,
-      }));
-
-      // Log the transformed data for debugging
-      console.log("Student form data initialized:", {
-        original: student,
-        transformed: {
-          planAmount:
-            typeof student.plan_amount === "number"
-              ? student.plan_amount
-              : typeof student.plan_amount === "string"
-              ? parseInt(student.plan_amount, 10)
-              : 0,
-          paidAmount:
-            typeof student.paid_amount === "number"
-              ? student.paid_amount
-              : typeof student.paid_amount === "string"
-              ? parseInt(student.paid_amount, 10)
-              : 0,
-        },
-      });
-    }
-  }, [student]);
-
   const formData = formState.data;
 
   // Helper function to update form data
@@ -215,15 +155,22 @@ export function StudentForm({ student, onSubmit, onClose }: StudentFormProps) {
         ...prev,
         data: {
           name: student.name,
-          group: student.group_name || "",
-          paymentPlan: student.payment_plan,
-          planAmount: student.plan_amount,
-          installmentCount: student.installment_count || 3,
-          paidAmount: student.paid_amount,
-          enrollmentDate: student.enrollment_date,
-          paymentStatus: student.payment_status,
+          group: student.group_name || student.group || "",
+          paymentPlan: (student.payment_plan ||
+            student.paymentPlan ||
+            "one-time") as "one-time" | "monthly" | "installment",
+          planAmount: student.plan_amount || student.planAmount || 0,
+          installmentCount:
+            student.installment_count || student.installmentCount || 3,
+          paidAmount: student.paid_amount || student.paidAmount || 0,
+          enrollmentDate:
+            student.enrollment_date ||
+            student.enrollmentDate ||
+            new Date().toISOString().split("T")[0],
+          paymentStatus: (student.payment_status ||
+            student.paymentStatus ||
+            "pending") as "paid" | "pending" | "overdue" | "due_soon",
         },
-        isDirty: false,
       }));
     }
   }, [student]);
@@ -231,25 +178,14 @@ export function StudentForm({ student, onSubmit, onClose }: StudentFormProps) {
   const validateForm = useCallback(() => {
     const newErrors: Record<string, string> = {};
 
-    // Use centralized validation with type checking
+    // Use centralized validation
     const validationErrors = validateStudentData({
       name: formData.name,
       group_name: formData.group,
       payment_plan: formData.paymentPlan,
-      plan_amount:
-        typeof formData.planAmount === "string"
-          ? parseInt(formData.planAmount, 10)
-          : formData.planAmount,
-      paid_amount:
-        typeof formData.paidAmount === "string"
-          ? parseInt(formData.paidAmount, 10)
-          : formData.paidAmount,
-      installment_count:
-        formData.paymentPlan === "installment"
-          ? typeof formData.installmentCount === "string"
-            ? parseInt(formData.installmentCount, 10)
-            : formData.installmentCount
-          : undefined,
+      plan_amount: formData.planAmount,
+      paid_amount: formData.paidAmount,
+      installment_count: formData.installmentCount,
     });
 
     // Map validation errors to form fields
@@ -297,6 +233,63 @@ export function StudentForm({ student, onSubmit, onClose }: StudentFormProps) {
     return Object.keys(newErrors).length === 0;
   }, [formData, groupsLoading, groupsError, groups.length]);
 
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    console.log("Form submitted with data:", formData);
+
+    if (!validateForm()) {
+      console.log("Form validation failed:", formState.errors);
+      return;
+    }
+
+    setFormState((prev) => ({ ...prev, isSubmitting: true }));
+
+    try {
+      const nextDueDate = calculateNextDueDate();
+      console.log("Calculated next due date:", nextDueDate);
+
+      // Create student data with proper backend format
+      const studentData: StudentFormData = {
+        name: formData.name,
+        group_name: formData.group,
+        payment_plan: formData.paymentPlan,
+        plan_amount: formData.planAmount,
+        installment_count: formData.installmentCount,
+        paid_amount: formData.paidAmount,
+        enrollment_date: formData.enrollmentDate,
+        payment_status: formData.paymentStatus,
+        next_due_date: nextDueDate,
+      };
+
+      if (student) {
+        console.log("Updating existing student:", student.id);
+        announce(`جاري تحديث بيانات الطالب ${formData.name}`);
+        onSubmit({
+          ...student,
+          ...studentData,
+        });
+      } else {
+        console.log("Adding new student");
+        announce(`جاري إضافة الطالب ${formData.name}`);
+        onSubmit(studentData as any);
+      }
+    } catch (error) {
+      console.error("Error in form submission:", error);
+      const errorMessage =
+        error instanceof Error
+          ? `حدث خطأ: ${error.message}`
+          : "حدث خطأ غير متوقع أثناء حفظ البيانات";
+
+      setFormState((prev) => ({
+        ...prev,
+        errors: { ...prev.errors, submit: errorMessage },
+      }));
+    } finally {
+      setFormState((prev) => ({ ...prev, isSubmitting: false }));
+    }
+  };
+
   const calculateNextDueDate = useCallback(() => {
     const enrollmentDate = new Date(formData.enrollmentDate);
 
@@ -322,98 +315,6 @@ export function StudentForm({ student, onSubmit, onClose }: StudentFormProps) {
     formData.paidAmount,
     formData.planAmount,
   ]);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    console.log("Form submitted with data:", formData);
-
-    // Add detailed logging for debugging
-    if (student) {
-      console.log("Original student data:", student);
-      console.log("Updated fields:", {
-        planAmount: formData.planAmount !== student.plan_amount,
-        paidAmount: formData.paidAmount !== student.paid_amount,
-        enrollmentDate: formData.enrollmentDate !== student.enrollment_date,
-      });
-    }
-
-    if (!validateForm()) {
-      console.log("Form validation failed:", formState.errors);
-      return;
-    }
-
-    setFormState((prev) => ({ ...prev, isSubmitting: true }));
-
-    try {
-      const nextDueDate = calculateNextDueDate();
-      console.log("Calculated next due date:", nextDueDate);
-
-      // Create student data with proper backend format
-      const studentData = {
-        name: formData.name,
-        group_name: formData.group,
-        payment_plan: formData.paymentPlan,
-        plan_amount: formData.planAmount,
-        installment_count: formData.installmentCount,
-        paid_amount: formData.paidAmount,
-        enrollment_date: formData.enrollmentDate,
-        payment_status: formData.paymentStatus,
-        next_due_date: nextDueDate,
-      };
-
-      if (student) {
-        console.log("Updating existing student:", student.id);
-        announce(`جاري تحديث بيانات الطالب ${formData.name}`);
-
-        // Create the update request in the format expected by the backend
-        const updateRequest = {
-          id: student.id,
-          name: formData.name,
-          group_name: formData.group,
-          payment_plan: formData.paymentPlan,
-          plan_amount: Number(formData.planAmount), // Ensure it's a number
-          paid_amount: Number(formData.paidAmount), // Ensure it's a number
-          installment_count:
-            formData.paymentPlan === "installment"
-              ? Number(formData.installmentCount)
-              : undefined,
-          enrollment_date: formData.enrollmentDate,
-          payment_status: formData.paymentStatus,
-          next_due_date: nextDueDate,
-          // Keep these from the original student
-          created_at: student.created_at,
-          updated_at: new Date().toISOString(),
-        };
-
-        console.log("Sending update request:", updateRequest);
-        onSubmit(updateRequest);
-      } else {
-        console.log("Adding new student");
-        announce(`جاري إضافة الطالب ${formData.name}`);
-        onSubmit({
-          ...studentData,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        } as Student);
-      }
-
-      onClose(); // Close form after successful submission
-    } catch (error) {
-      console.error("Error in form submission:", error);
-      const errorMessage =
-        error instanceof Error
-          ? `حدث خطأ: ${error.message}`
-          : "حدث خطأ غير متوقع أثناء حفظ البيانات";
-
-      setFormState((prev) => ({
-        ...prev,
-        errors: { ...prev.errors, submit: errorMessage },
-      }));
-    } finally {
-      setFormState((prev) => ({ ...prev, isSubmitting: false }));
-    }
-  };
 
   const handlePaymentPlanChange = useCallback(
     (plan: "one-time" | "monthly" | "installment") => {
@@ -447,18 +348,19 @@ export function StudentForm({ student, onSubmit, onClose }: StudentFormProps) {
         className="max-w-2xl max-h-[90vh] overflow-y-auto"
         dir="rtl"
         ref={containerRef as React.RefObject<HTMLDivElement>}
+        role="dialog"
         aria-labelledby="student-form-title"
         aria-describedby="student-form-description"
       >
         <DialogHeader>
-          <DialogTitle>
+          <DialogTitle id="student-form-title">
             {student ? "تعديل بيانات الطالب" : "إضافة طالب جديد"}
           </DialogTitle>
-          <DialogDescription>
+          <div id="student-form-description" className="sr-only">
             {student
               ? "نموذج لتعديل بيانات الطالب الحالي"
               : "نموذج لإضافة طالب جديد إلى النظام"}
-          </DialogDescription>
+          </div>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-6" noValidate>
@@ -476,7 +378,7 @@ export function StudentForm({ student, onSubmit, onClose }: StudentFormProps) {
                 aria-describedby={
                   formState.errors.name ? "name-error" : undefined
                 }
-                autoFocus
+                // Remove autofocus to prevent stealing focus from other fields
               />
               {formState.errors.name && (
                 <p

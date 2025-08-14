@@ -639,11 +639,20 @@ impl StudentService {
         // Get payment plan configuration
         let config = Self::get_payment_plan_config(db)?;
 
-        // Recalculate next due date if payment plan changed
-        let next_due_date = if current_student.payment_plan != request.payment_plan {
+        // Derive new values for optionally updatable fields
+        let new_paid_amount = request.paid_amount.unwrap_or(current_student.paid_amount);
+        let new_enrollment_date = request
+            .enrollment_date
+            .clone()
+            .unwrap_or(current_student.enrollment_date.clone());
+
+        // Recalculate next due date if payment plan or enrollment date changed
+        let next_due_date = if current_student.payment_plan != request.payment_plan
+            || current_student.enrollment_date != new_enrollment_date
+        {
             Self::calculate_next_due_date(
                 &request.payment_plan,
-                &current_student.enrollment_date,
+                &new_enrollment_date,
                 None, // Reset due date calculation for plan changes
                 config.installment_interval,
             )?
@@ -655,10 +664,10 @@ impl StudentService {
         let payment_status = Self::calculate_payment_status(
             &request.payment_plan,
             request.plan_amount,
-            current_student.paid_amount,
+            new_paid_amount,
             request.installment_count,
             next_due_date.as_deref(),
-            &current_student.enrollment_date,
+            &new_enrollment_date,
             config.reminder_days,
         )?;
 
@@ -666,22 +675,24 @@ impl StudentService {
         let old_data = AuditService::serialize_data(&current_student).ok();
 
         // Store values we need after the move
-        let paid_amount = current_student.paid_amount;
-        let enrollment_date = current_student.enrollment_date.clone();
+        let paid_amount = new_paid_amount;
+        let enrollment_date = new_enrollment_date.clone();
         let created_at = current_student.created_at.clone();
 
         // Update student in database
         let now = Utc::now().to_rfc3339();
         let rows_affected = db.connection().execute(
             "UPDATE students 
-             SET name = ?1, group_name = ?2, payment_plan = ?3, plan_amount = ?4, installment_count = ?5, next_due_date = ?6, payment_status = ?7, updated_at = ?8 
-             WHERE id = ?9",
+             SET name = ?1, group_name = ?2, payment_plan = ?3, plan_amount = ?4, installment_count = ?5, paid_amount = ?6, enrollment_date = ?7, next_due_date = ?8, payment_status = ?9, updated_at = ?10 
+             WHERE id = ?11",
             params![
                 request.name.trim(),
                 request.group_name.trim(),
                 request.payment_plan.as_str(),
                 request.plan_amount,
                 request.installment_count,
+                paid_amount,
+                enrollment_date,
                 next_due_date,
                 payment_status.as_str(),
                 now,
@@ -1055,7 +1066,6 @@ mod tests {
         assert_eq!(student.plan_amount, 2850);
         assert_eq!(student.installment_count, Some(3));
         assert!(student.next_due_date.is_some());
-        
     }
 
     #[test]
@@ -1068,9 +1078,9 @@ mod tests {
             group_name: "Group A".to_string(),
             payment_plan: PaymentPlan::OneTime,
             plan_amount: 6000,
-             installment_count: None,
+            installment_count: None,
             enrollment_date: None,
-            paid_amount: None
+            paid_amount: None,
         };
         assert!(StudentService::create_student(&db, request).is_err());
 
@@ -1080,9 +1090,9 @@ mod tests {
             group_name: "Group A".to_string(),
             payment_plan: PaymentPlan::OneTime,
             plan_amount: -100,
-             installment_count: None,
+            installment_count: None,
             enrollment_date: None,
-            paid_amount: None
+            paid_amount: None,
         };
         assert!(StudentService::create_student(&db, request).is_err());
 
@@ -1092,9 +1102,9 @@ mod tests {
             group_name: "Group A".to_string(),
             payment_plan: PaymentPlan::Installment,
             plan_amount: 2850,
-             installment_count: None,
+            installment_count: None,
             enrollment_date: None,
-            paid_amount: None
+            paid_amount: None,
         };
         assert!(StudentService::create_student(&db, request).is_err());
     }
@@ -1181,9 +1191,9 @@ mod tests {
             group_name: "Group A".to_string(),
             payment_plan: PaymentPlan::OneTime,
             plan_amount: 6000,
-             installment_count: None,
+            installment_count: None,
             enrollment_date: None,
-            paid_amount: None
+            paid_amount: None,
         };
         let student1 = StudentService::create_student(&db, request1).unwrap();
 
@@ -1192,9 +1202,9 @@ mod tests {
             group_name: "Group A".to_string(),
             payment_plan: PaymentPlan::Monthly,
             plan_amount: 850,
-             installment_count: None,
+            installment_count: None,
             enrollment_date: None,
-            paid_amount: None
+            paid_amount: None,
         };
         let student2 = StudentService::create_student(&db, request2).unwrap();
 
@@ -1220,9 +1230,9 @@ mod tests {
             group_name: "Group A".to_string(),
             payment_plan: PaymentPlan::OneTime,
             plan_amount: 6000,
-             installment_count: None,
+            installment_count: None,
             enrollment_date: None,
-            paid_amount: None
+            paid_amount: None,
         };
         let student = StudentService::create_student(&db, request).unwrap();
 
@@ -1233,7 +1243,7 @@ mod tests {
             plan_amount: 850,
             installment_count: None,
             enrollment_date: None,
-            paid_amount: None
+            paid_amount: None,
         };
 
         StudentService::update_student(&db, &student.id, update_request).unwrap();

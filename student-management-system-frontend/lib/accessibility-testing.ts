@@ -1,33 +1,14 @@
 /**
  * Accessibility testing utilities using axe-core
- * Provides automated accessibility testing for Arabic/RTL content
+ * For testing ARIA compliance and screen reader compatibility
  */
 
-// Temporarily disabled due to import issues
-// import configureAxe from "@axe-core/react";
-// import toHaveNoViolations from "@axe-core/react";
+import { axe, toHaveNoViolations } from "jest-axe";
 
 // Configure axe for Arabic/RTL content
 export const configureAxeForArabic = () => {
-  // Temporarily disabled
-  console.log("Accessibility testing temporarily disabled");
-
-  // configureAxe({
-  //   rules: {
-  //     // Enable all WCAG 2.1 AA rules
-  //     "color-contrast": { enabled: true },
-  //     "document-title": { enabled: true },
-  //     "html-has-lang": { enabled: true },
-  //     "landmark-one-main": { enabled: true },
-  //     "page-has-heading-one": { enabled: true },
-  //     "region": { enabled: true },
-  //   },
-  //   // Configure for Arabic/RTL content
-  //   locale: {
-  //     language: "ar",
-  //     direction: "rtl",
-  //   },
-  // });
+  // Basic configuration for accessibility testing
+  return axe;
 };
 
 // Screen reader simulation for testing

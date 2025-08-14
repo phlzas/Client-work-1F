@@ -17,18 +17,26 @@ interface FormData {
 export function studentToFormData(student: Student): FormData {
   return {
     name: student.name,
-    group: student.group_name || "",
-    paymentPlan: student.payment_plan as FormData["paymentPlan"],
-    planAmount: student.plan_amount,
-    installmentCount: student.installment_count || 3,
-    paidAmount: student.paid_amount,
-    enrollmentDate: student.enrollment_date,
-    paymentStatus: student.payment_status as FormData["paymentStatus"],
+    group: student.group_name || student.group || "",
+    paymentPlan: (student.payment_plan ||
+      student.paymentPlan ||
+      "one-time") as FormData["paymentPlan"],
+    planAmount: student.plan_amount || student.planAmount || 0,
+    installmentCount:
+      student.installment_count || student.installmentCount || 3,
+    paidAmount: student.paid_amount || student.paidAmount || 0,
+    enrollmentDate:
+      student.enrollment_date ||
+      student.enrollmentDate ||
+      new Date().toISOString().split("T")[0],
+    paymentStatus: (student.payment_status ||
+      student.paymentStatus ||
+      "pending") as FormData["paymentStatus"],
   };
 }
 
 /**
- * Transforms form data to student format
+ * Transforms form data to student format with both snake_case and camelCase for compatibility
  */
 export function formDataToStudent(
   formData: FormData,
@@ -38,16 +46,27 @@ export function formDataToStudent(
 
   return {
     name: formData.name,
+    // Provide both formats for compatibility
     group_name: formData.group,
+    group: formData.group,
     payment_plan: formData.paymentPlan,
+    paymentPlan: formData.paymentPlan,
     plan_amount: formData.planAmount,
+    planAmount: formData.planAmount,
     installment_count: formData.installmentCount,
+    installmentCount: formData.installmentCount,
     paid_amount: formData.paidAmount,
+    paidAmount: formData.paidAmount,
     enrollment_date: formData.enrollmentDate,
+    enrollmentDate: formData.enrollmentDate,
     payment_status: formData.paymentStatus,
+    paymentStatus: formData.paymentStatus,
     next_due_date: nextDueDate,
+    nextDueDate: nextDueDate,
     created_at: timestamp,
+    createdAt: timestamp,
     updated_at: timestamp,
+    updatedAt: timestamp,
   };
 }
 

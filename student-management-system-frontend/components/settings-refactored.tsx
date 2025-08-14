@@ -32,11 +32,15 @@ interface SettingsProps {
 // Utility function to normalize settings data
 const normalizeSettings = (settings: AppSettings): AppSettings => ({
   ...settings,
-  payment_threshold: settings.payment_threshold,
-  default_groups: settings.default_groups,
-  enable_audit_log: settings.enable_audit_log,
-  backup_encryption: settings.backup_encryption,
-  accessibility_mode: settings.accessibility_mode,
+  payment_threshold:
+    settings.payment_threshold ?? settings.paymentThreshold ?? 0,
+  default_groups: settings.default_groups ?? settings.defaultGroups ?? [],
+  enable_audit_log:
+    settings.enable_audit_log ?? settings.enableAuditLog ?? false,
+  backup_encryption:
+    settings.backup_encryption ?? settings.backupEncryption ?? false,
+  accessibility_mode:
+    settings.accessibility_mode ?? settings.accessibilityMode ?? false,
 });
 
 export function Settings({ settings, onUpdateSettings }: SettingsProps) {
@@ -117,7 +121,11 @@ export function Settings({ settings, onUpdateSettings }: SettingsProps) {
                 </div>
                 <Switch
                   id="enableAuditLog"
-                  checked={localSettings.enable_audit_log}
+                  checked={
+                    localSettings.enable_audit_log ||
+                    localSettings.enableAuditLog ||
+                    false
+                  }
                   onCheckedChange={(checked) =>
                     updateSetting("enable_audit_log", checked)
                   }
@@ -135,11 +143,16 @@ export function Settings({ settings, onUpdateSettings }: SettingsProps) {
                 </div>
                 <Switch
                   id="backupEncryption"
-                  checked={localSettings.backup_encryption}
+                  checked={
+                    localSettings.backup_encryption ||
+                    localSettings.backupEncryption ||
+                    false
+                  }
                   onCheckedChange={(checked) =>
                     setLocalSettings({
                       ...localSettings,
                       backup_encryption: checked,
+                      backupEncryption: checked, // Keep both for compatibility
                     })
                   }
                 />
@@ -154,11 +167,16 @@ export function Settings({ settings, onUpdateSettings }: SettingsProps) {
                 </div>
                 <Switch
                   id="accessibilityMode"
-                  checked={localSettings.accessibility_mode}
+                  checked={
+                    localSettings.accessibility_mode ||
+                    localSettings.accessibilityMode ||
+                    false
+                  }
                   onCheckedChange={(checked) =>
                     setLocalSettings({
                       ...localSettings,
                       accessibility_mode: checked,
+                      accessibilityMode: checked, // Keep both for compatibility
                     })
                   }
                 />

@@ -168,7 +168,7 @@ export function ExportManager({ students }: ExportManagerProps) {
             : "أقساط";
         })(),
         "تاريخ التسجيل": new Date(
-          student.enrollment_date || new Date()
+          student.enrollment_date || student.enrollmentDate || new Date()
         ).toLocaleDateString("ar-EG"),
         "المبلغ المدفوع": (
           student.paid_amount ||

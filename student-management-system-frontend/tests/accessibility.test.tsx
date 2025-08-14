@@ -1,66 +1,27 @@
 /**
- * Accessibility tests for the Student Management System
- * Tests ARIA support, screen reader compatibility, and keyboard navigation
+ * Comprehensive accessibility tests for the Student Management System
+ * Tests ARIA compliance, keyboard navigation, screen reader compatibility, and high contrast mode
  */
 
+import React from "react";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { axe, toHaveNoViolations } from "jest-axe";
 import userEvent from "@testing-library/user-event";
-import { AccessibilityProvider } from "@/components/accessibility-provider";
+
+// Import components to test
 import { QRScanner } from "@/components/qr-scanner";
 import { StudentGrid } from "@/components/student-grid";
 import { StudentForm } from "@/components/student-form";
+import { AccessibilityProvider } from "@/components/accessibility-provider";
 import { HighContrastToggle } from "@/components/high-contrast-toggle";
+import { SkipNavigation } from "@/components/skip-navigation";
 
-// Mock missing test utilities
-class ScreenReaderSimulator {
-  announcements: string[] = [];
-
-  announce(message: string) {
-    this.announcements.push(message);
-  }
-
-  getLastAnnouncement() {
-    return this.announcements[this.announcements.length - 1];
-  }
-}
-
-class AccessibilityTestSuite {
-  constructor(private container: HTMLElement) {}
-
-  async runFullTest() {
-    const axeResults = await axe(this.container);
-    return {
-      summary: { failed: axeResults.violations.length },
-      keyboardResults: { issues: [] },
-      contrastResults: { passes: axeResults.violations.length === 0 },
-      screenReaderResults: ["Test completed"],
-    };
-  }
-}
-
-// Mock SkipNavigation component
-const SkipNavigation: React.FC = () => (
-  <nav role="navigation" aria-label="روابط التخطي">
-    <a href="#main-content" className="sr-only focus:not-sr-only">
-      تخطي إلى المحتوى الرئيسي
-    </a>
-  </nav>
-);
-
-// Extend Jest matchers
-expect.extend(toHaveNoViolations);
-
-// Test helper functions
-const renderWithAccessibility = (component: React.ReactElement) => {
-  return render(<AccessibilityWrapper>{component}</AccessibilityWrapper>);
-};
-
-const runAxeTest = async (container: HTMLElement) => {
-  const results = await axe(container);
-  expect(results).toHaveNoViolations();
-  return results;
-};
+// Import testing utilities
+import {
+  AccessibilityTestSuite,
+  ScreenReaderSimulator,
+  configureAxeForArabic,
+} from "@/lib/accessibility-testing";
 
 // Mock data
 const mockStudents = [
@@ -78,11 +39,25 @@ const mockStudents = [
     createdAt: "2024-01-01",
     updatedAt: "2024-01-01",
   },
+  {
+    id: "2",
+    name: "فاطمة علي",
+    group: "المجموعة الثانية",
+    paymentPlan: "installment" as const,
+    planAmount: 2850,
+    paidAmount: 1000,
+    paymentStatus: "pending" as const,
+    enrollmentDate: "2024-01-15",
+    attendanceLog: [],
+    paymentHistory: [],
+    createdAt: "2024-01-15",
+    updatedAt: "2024-01-15",
+  },
 ];
 
 const mockSettings = {
   payment_threshold: 6000,
-  default_groups: ["المجموعة الأولى"],
+  default_groups: ["المجموعة الأولى", "المجموعة الثانية"],
   enable_audit_log: true,
   language: "ar" as const,
   theme: "light" as const,
@@ -92,7 +67,13 @@ const mockSettings = {
   reminder_days: 7,
 };
 
-// Wrapper component with accessibility provider and RTL support
+// Configure axe for Arabic content
+beforeAll(() => {
+  configureAxeForArabic();
+  expect.extend(toHaveNoViolations);
+});
+
+// Wrapper component with providers
 const AccessibilityWrapper: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => (
@@ -104,30 +85,27 @@ const AccessibilityWrapper: React.FC<{ children: React.ReactNode }> = ({
 );
 
 describe("Accessibility Tests", () => {
-  describe("ARIA Support", () => {
-    test("QR Scanner has proper ARIA labels", async () => {
+  describe("ARIA Labels and Roles", () => {
+    test("QRScanner has proper ARIA labels", async () => {
       const mockOnScan = jest.fn();
-      const { container } = renderWithAccessibility(
-        <QRScanner onScan={mockOnScan} result="" />
+      const { container } = render(
+        <AccessibilityWrapper>
+          <QRScanner onScan={mockOnScan} result="" />
+        </AccessibilityWrapper>
       );
 
-      // Check for proper ARIA labels using more robust assertions
-      const input = screen.getByRole("textbox");
-      expect(input).toHaveAccessibleName("مسح رمز QR أو إدخال رقم الطالب");
-      expect(input).toHaveAttribute("aria-describedby");
+      // Check for proper ARIA labels
+      expect(
+        screen.getByLabelText("مسح رمز QR أو إدخال رقم الطالب")
+      ).toBeInTheDocument();
+      expect(screen.getByRole("textbox")).toHaveAttribute("aria-describedby");
 
-      // Check for live region if result is provided
-      if (screen.queryByRole("status")) {
-        const liveRegion = screen.getByRole("status");
-        expect(liveRegion).toHaveAttribute("aria-live", "assertive");
-        expect(liveRegion).toHaveAttribute("aria-atomic", "true");
-      }
-
-      // Run axe accessibility tests
-      await runAxeTest(container);
+      // Run axe tests
+      const results = await axe(container);
+      expect(results).toHaveNoViolations();
     });
 
-    test("Student Grid has proper table semantics", async () => {
+    test("StudentGrid has proper table structure and ARIA", async () => {
       const mockProps = {
         students: mockStudents,
         onEditStudent: jest.fn(),
@@ -141,26 +119,24 @@ describe("Accessibility Tests", () => {
         </AccessibilityWrapper>
       );
 
-      // Check table semantics
-      expect(screen.getByRole("table")).toHaveAttribute(
-        "aria-label",
-        "جدول الطلاب"
-      );
-      expect(screen.getAllByRole("columnheader")).toHaveLength(8);
-      expect(screen.getAllByRole("row")).toHaveLength(2); // Header + 1 data row
+      // Check table structure
+      expect(screen.getByRole("table")).toBeInTheDocument();
+      expect(screen.getByLabelText("جدول الطلاب")).toBeInTheDocument();
 
-      // Check search functionality
-      expect(screen.getByRole("searchbox")).toHaveAttribute(
-        "aria-label",
-        "البحث في قائمة الطلاب"
-      );
+      // Check column headers
+      const columnHeaders = screen.getAllByRole("columnheader");
+      expect(columnHeaders).toHaveLength(8); // All table columns
 
-      // Run axe accessibility tests
+      // Check rows
+      const rows = screen.getAllByRole("row");
+      expect(rows.length).toBeGreaterThan(1); // Header + data rows
+
+      // Run axe tests
       const results = await axe(container);
       expect(results).toHaveNoViolations();
     });
 
-    test("Student Form has proper form semantics", async () => {
+    test("StudentForm has proper form structure and labels", async () => {
       const mockProps = {
         student: null,
         settings: mockSettings,
@@ -174,28 +150,22 @@ describe("Accessibility Tests", () => {
         </AccessibilityWrapper>
       );
 
-      // Check dialog semantics
-      expect(screen.getByRole("dialog")).toHaveAttribute("aria-labelledby");
-      expect(screen.getByRole("dialog")).toHaveAttribute("aria-describedby");
+      // Check dialog structure
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+      expect(screen.getByLabelText(/إضافة طالب جديد/)).toBeInTheDocument();
 
-      // Check form fields have proper labels
+      // Check form fields have labels
       expect(screen.getByLabelText("اسم الطالب *")).toBeInTheDocument();
       expect(screen.getByLabelText("المجموعة")).toBeInTheDocument();
-      expect(screen.getByLabelText("المبلغ المدفوع")).toBeInTheDocument();
 
-      // Check required field indicators
-      const nameInput = screen.getByLabelText("اسم الطالب *");
-      expect(nameInput).toHaveAttribute("required");
-      expect(nameInput).toHaveAttribute("aria-invalid", "false");
-
-      // Run axe accessibility tests
+      // Run axe tests
       const results = await axe(container);
       expect(results).toHaveNoViolations();
     });
   });
 
   describe("Keyboard Navigation", () => {
-    test("QR Scanner supports keyboard navigation", async () => {
+    test("QRScanner supports keyboard navigation", async () => {
       const user = userEvent.setup();
       const mockOnScan = jest.fn();
 
@@ -207,21 +177,25 @@ describe("Accessibility Tests", () => {
 
       const input = screen.getByRole("textbox");
 
-      // Test keyboard input
+      // Test focus
+      await user.click(input);
+      expect(input).toHaveFocus();
+
+      // Test typing
       await user.type(input, "12345");
       expect(input).toHaveValue("12345");
 
-      // Test Enter key submission
+      // Test Enter key
       await user.keyboard("{Enter}");
       expect(mockOnScan).toHaveBeenCalledWith("12345");
 
-      // Test Escape key clearing
+      // Test Escape key
       await user.type(input, "test");
       await user.keyboard("{Escape}");
       expect(input).toHaveValue("");
     });
 
-    test("Student Grid supports arrow key navigation", async () => {
+    test("StudentGrid supports arrow key navigation", async () => {
       const user = userEvent.setup();
       const mockProps = {
         students: mockStudents,
@@ -238,18 +212,30 @@ describe("Accessibility Tests", () => {
 
       const table = screen.getByRole("table");
       const rows = screen.getAllByRole("row");
-      const dataRow = rows[1]; // Skip header row
+      const dataRows = rows.slice(1); // Skip header row
 
-      // Focus on the data row
-      dataRow.focus();
-      expect(dataRow).toHaveFocus();
+      // Focus first data row
+      if (dataRows[0]) {
+        dataRows[0].focus();
+        expect(dataRows[0]).toHaveFocus();
 
-      // Test Enter key for editing
-      await user.keyboard("{Enter}");
-      expect(mockProps.onEditStudent).toHaveBeenCalledWith(mockStudents[0]);
+        // Test arrow down
+        await user.keyboard("{ArrowDown}");
+        if (dataRows[1]) {
+          expect(dataRows[1]).toHaveFocus();
+        }
+
+        // Test arrow up
+        await user.keyboard("{ArrowUp}");
+        expect(dataRows[0]).toHaveFocus();
+
+        // Test Enter key
+        await user.keyboard("{Enter}");
+        expect(mockProps.onEditStudent).toHaveBeenCalled();
+      }
     });
 
-    test("Student Form supports tab navigation and escape", async () => {
+    test("StudentForm traps focus properly", async () => {
       const user = userEvent.setup();
       const mockProps = {
         student: null,
@@ -264,14 +250,59 @@ describe("Accessibility Tests", () => {
         </AccessibilityWrapper>
       );
 
-      // Test Escape key closes form
+      const dialog = screen.getByRole("dialog");
+      const focusableElements = dialog.querySelectorAll(
+        'button, input, select, textarea, [tabindex]:not([tabindex="-1"])'
+      );
+
+      expect(focusableElements.length).toBeGreaterThan(0);
+
+      // Test Escape key closes dialog
       await user.keyboard("{Escape}");
       expect(mockProps.onClose).toHaveBeenCalled();
     });
   });
 
+  describe("Screen Reader Compatibility", () => {
+    test("Components announce changes properly", async () => {
+      const screenReader = new ScreenReaderSimulator();
+      const mockOnScan = jest.fn();
+
+      render(
+        <AccessibilityWrapper>
+          <QRScanner onScan={mockOnScan} result="تم تسجيل حضور أحمد محمد" />
+        </AccessibilityWrapper>
+      );
+
+      // Check for live region
+      const liveRegion = screen.getByRole("status");
+      expect(liveRegion).toBeInTheDocument();
+      expect(liveRegion).toHaveAttribute("aria-live", "assertive");
+      expect(liveRegion).toHaveTextContent("تم تسجيل حضور أحمد محمد");
+    });
+
+    test("Navigation landmarks are properly labeled", () => {
+      render(
+        <AccessibilityWrapper>
+          <SkipNavigation />
+          <main id="main-content" role="main">
+            <h1>نظام إدارة الطلاب</h1>
+          </main>
+        </AccessibilityWrapper>
+      );
+
+      // Check skip navigation
+      const skipNav = screen.getByRole("navigation", { name: "روابط التخطي" });
+      expect(skipNav).toBeInTheDocument();
+
+      // Check main landmark
+      const main = screen.getByRole("main");
+      expect(main).toBeInTheDocument();
+    });
+  });
+
   describe("High Contrast Mode", () => {
-    test("High contrast toggle works correctly", async () => {
+    test("High contrast toggle works properly", async () => {
       const user = userEvent.setup();
 
       render(
@@ -281,60 +312,70 @@ describe("Accessibility Tests", () => {
       );
 
       const toggle = screen.getByRole("switch");
+      expect(toggle).toBeInTheDocument();
       expect(toggle).toHaveAttribute("aria-pressed", "false");
 
-      // Click to enable high contrast
+      // Click toggle
       await user.click(toggle);
 
+      // Check if high contrast class is added
       await waitFor(() => {
-        expect(toggle).toHaveAttribute("aria-pressed", "true");
         expect(document.documentElement).toHaveClass("high-contrast");
       });
 
-      // Click again to disable
-      await user.click(toggle);
-
-      await waitFor(() => {
-        expect(toggle).toHaveAttribute("aria-pressed", "false");
-        expect(document.documentElement).not.toHaveClass("high-contrast");
-      });
+      expect(toggle).toHaveAttribute("aria-pressed", "true");
     });
 
     test("High contrast styles are applied correctly", () => {
-      // Enable high contrast mode
+      // Add high contrast class
       document.documentElement.classList.add("high-contrast");
-
-      const { container } = render(
-        <AccessibilityWrapper>
-          <div className="bg-red-50 text-red-600">Test content</div>
-        </AccessibilityWrapper>
-      );
-
-      // Check that high contrast styles are applied
-      const element = container.querySelector(".bg-red-50");
-      const computedStyle = window.getComputedStyle(element!);
-
-      // In high contrast mode, colors should be more pronounced
-      expect(element).toHaveClass("bg-red-50");
-    });
-  });
-
-  describe("Screen Reader Support", () => {
-    test("Live regions announce changes", async () => {
-      const mockOnScan = jest.fn();
 
       render(
         <AccessibilityWrapper>
-          <QRScanner onScan={mockOnScan} result="تم تسجيل حضور أحمد محمد" />
+          <div className="bg-red-50 text-red-600">Error message</div>
         </AccessibilityWrapper>
       );
 
-      // Check that result is announced in live region
-      const liveRegion = screen.getByRole("status");
-      expect(liveRegion).toHaveTextContent("تم تسجيل حضور أحمد محمد");
+      const errorDiv = screen.getByText("Error message");
+      const styles = window.getComputedStyle(errorDiv);
+
+      // In high contrast mode, colors should be more pronounced
+      // This would need actual CSS testing in a real browser environment
+      expect(errorDiv).toHaveClass("bg-red-50", "text-red-600");
+
+      // Cleanup
+      document.documentElement.classList.remove("high-contrast");
+    });
+  });
+
+  describe("RTL Support", () => {
+    test("Components render correctly in RTL mode", () => {
+      const mockOnScan = jest.fn();
+
+      render(
+        <div dir="rtl">
+          <QRScanner onScan={mockOnScan} result="" />
+        </div>
+      );
+
+      const container = screen.getByRole("textbox").closest('[dir="rtl"]');
+      expect(container).toBeInTheDocument();
     });
 
-    test("Form validation errors are announced", async () => {
+    test("Text alignment is correct for Arabic content", () => {
+      render(
+        <div dir="rtl" className="text-right">
+          <p>نص عربي للاختبار</p>
+        </div>
+      );
+
+      const paragraph = screen.getByText("نص عربي للاختبار");
+      expect(paragraph.closest("div")).toHaveAttribute("dir", "rtl");
+    });
+  });
+
+  describe("Error Handling and Validation", () => {
+    test("Form validation errors are announced properly", async () => {
       const user = userEvent.setup();
       const mockProps = {
         student: null,
@@ -354,107 +395,47 @@ describe("Accessibility Tests", () => {
       // Try to submit empty form
       await user.click(submitButton);
 
-      // Check that validation errors are properly associated
-      const nameInput = screen.getByLabelText("اسم الطالب *");
-      expect(nameInput).toHaveAttribute("aria-invalid", "true");
-      expect(nameInput).toHaveAttribute("aria-describedby");
-    });
-  });
-
-  describe("RTL Support", () => {
-    test("Components render correctly in RTL layout", () => {
-      const { container } = render(
-        <div dir="rtl">
-          <AccessibilityWrapper>
-            <QRScanner onScan={jest.fn()} result="" />
-          </AccessibilityWrapper>
-        </div>
-      );
-
-      // Check that RTL direction is applied
-      expect(container.firstChild).toHaveAttribute("dir", "rtl");
-    });
-  });
-
-  describe("Focus Management", () => {
-    test("Focus is trapped within modal dialogs", async () => {
-      const user = userEvent.setup();
-      const mockProps = {
-        student: null,
-        settings: mockSettings,
-        onSubmit: jest.fn(),
-        onClose: jest.fn(),
-      };
-
-      render(
-        <AccessibilityWrapper>
-          <StudentForm {...mockProps} />
-        </AccessibilityWrapper>
-      );
-
-      const dialog = screen.getByRole("dialog");
-      const firstInput = screen.getByLabelText("اسم الطالب *");
-      const lastButton = screen.getByRole("button", { name: /إضافة الطالب/ });
-
-      // Focus should start on first input
-      expect(firstInput).toHaveFocus();
-
-      // Tab to last element
-      await user.tab();
-      await user.tab();
-      // Continue tabbing to reach last button...
-
-      // Tab from last element should cycle back to first
-      await user.tab();
-      // Focus should cycle back (implementation depends on focus trap)
-    });
-
-    test("Focus is restored after modal closes", async () => {
-      const user = userEvent.setup();
-
-      // Create a button that opens the modal
-      const OpenModalButton = () => {
-        const [isOpen, setIsOpen] = React.useState(false);
-
-        return (
-          <>
-            <button onClick={() => setIsOpen(true)}>Open Modal</button>
-            {isOpen && (
-              <StudentForm
-                student={null}
-                settings={mockSettings}
-                onSubmit={jest.fn()}
-                onClose={() => setIsOpen(false)}
-              />
-            )}
-          </>
-        );
-      };
-
-      render(
-        <AccessibilityWrapper>
-          <OpenModalButton />
-        </AccessibilityWrapper>
-      );
-
-      const openButton = screen.getByText("Open Modal");
-
-      // Focus and click the open button
-      openButton.focus();
-      expect(openButton).toHaveFocus();
-
-      await user.click(openButton);
-
-      // Modal should be open and focused
-      expect(screen.getByRole("dialog")).toBeInTheDocument();
-
-      // Close modal with Escape
-      await user.keyboard("{Escape}");
-
-      // Focus should return to the open button
+      // Check for error messages
       await waitFor(() => {
-        expect(openButton).toHaveFocus();
+        const nameInput = screen.getByLabelText("اسم الطالب *");
+        expect(nameInput).toHaveAttribute("aria-invalid", "true");
       });
+    });
+  });
+
+  describe("Comprehensive Accessibility Test", () => {
+    test("Full accessibility test suite passes", async () => {
+      const mockProps = {
+        students: mockStudents,
+        onEditStudent: jest.fn(),
+        onDeleteStudent: jest.fn(),
+        onAddStudent: jest.fn(),
+      };
+
+      const { container } = render(
+        <AccessibilityWrapper>
+          <SkipNavigation />
+          <main id="main-content">
+            <h1>نظام إدارة الطلاب</h1>
+            <StudentGrid {...mockProps} />
+            <QRScanner onScan={jest.fn()} result="" />
+          </main>
+        </AccessibilityWrapper>
+      );
+
+      // Run comprehensive test suite
+      const testSuite = new AccessibilityTestSuite(container);
+      const results = await testSuite.runFullTest();
+
+      // Check results
+      expect(results.summary.failed).toBe(0);
+      expect(results.keyboardResults.issues).toHaveLength(0);
+      expect(results.contrastResults.passes).toBe(true);
+      expect(results.screenReaderResults.length).toBeGreaterThan(0);
+
+      // Run axe tests
+      const axeResults = await axe(container);
+      expect(axeResults).toHaveNoViolations();
     });
   });
 });

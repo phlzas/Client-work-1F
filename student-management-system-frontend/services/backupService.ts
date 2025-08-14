@@ -9,16 +9,19 @@ export class BackupService {
   /**
    * Create a backup to a default location
    */
-  static async createBackup(password?: string): Promise<BackupMetadata> {
+  static async createBackup(
+    password?: string
+  ): Promise<BackupMetadata & { file_path?: string }> {
     // Generate default file path
     const timestamp = new Date().toISOString().split("T")[0];
     const filePath = `backup-${timestamp}.smsbackup`;
 
     // Create backup
-    return await invoke<BackupMetadata>("create_backup", {
+    const result = await invoke<BackupMetadata>("create_backup", {
       filePath,
       password,
     });
+    return { ...(result as BackupMetadata), file_path: filePath };
   }
 
   /**
@@ -43,9 +46,7 @@ export class BackupService {
     const validation = await this.validateBackup(filePath);
     if (!validation.is_valid) {
       throw new Error(
-        `ملف النسخة الاحتياطية غير صالح: ${
-          validation.errors?.join(", ") || validation.message || "خطأ غير معروف"
-        }`
+        `ملف النسخة الاحتياطية غير صالح: ${validation.errors.join(", ")}`
       );
     }
 

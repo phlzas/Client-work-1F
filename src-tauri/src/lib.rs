@@ -7,7 +7,6 @@ pub mod groups_service;
 pub mod payment_service;
 pub mod payment_settings_service;
 pub mod qr_service;
-pub mod scanner_lock;
 pub mod settings_service;
 pub mod student_service;
 
@@ -240,11 +239,11 @@ async fn mark_attendance(
     #[allow(non_snake_case)] studentId: String,
     date: String,
 ) -> Result<AttendanceRecord, String> {
-    let mut db = state
+    let db = state
         .db
         .lock()
         .map_err(|e| format!("Failed to lock database: {}", e))?;
-    AttendanceService::mark_attendance(&mut *db, &studentId, &date)
+    AttendanceService::mark_attendance(&db, &studentId, &date)
         .map_err(|e| format!("Failed to mark attendance: {}", e))
 }
 
@@ -1298,12 +1297,11 @@ pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
             if cfg!(debug_assertions) {
-                // Temporarily disabled due to plugin configuration issues
-                // app.handle().plugin(
-                //     tauri_plugin_log::Builder::default()
-                //         .level(log::LevelFilter::Info)
-                //         .build(),
-                // )?;
+                app.handle().plugin(
+                    tauri_plugin_log::Builder::default()
+                        .level(log::LevelFilter::Info)
+                        .build(),
+                )?;
             }
 
             // Initialize database

@@ -189,15 +189,13 @@ impl QRService {
         })
     }
 
-    /// Export QR codes to PDF file (simplified version)
+    /// Export QR codes to PDF file (simplified: writes text content)
+    /// Note: This produces a plain text file with .pdf extension as a temporary solution.
     pub fn export_qr_codes_to_pdf(
         qr_codes: &[QRCodeData],
         file_path: &str,
         title: Option<&str>,
     ) -> Result<(), QRServiceError> {
-        // For now, create a simple text-based PDF with QR code data
-        // This is a simplified implementation that can be enhanced later
-
         let mut content = String::new();
         content.push_str(&format!("{}\n\n", title.unwrap_or("Student QR Codes")));
 
@@ -208,9 +206,7 @@ impl QRService {
             ));
         }
 
-        // Write to file (simplified - in a real implementation, this would be a proper PDF)
         std::fs::write(file_path, content)?;
-
         Ok(())
     }
 
@@ -235,7 +231,6 @@ impl QRService {
 
         Self::export_qr_codes_to_pdf(&qr_codes, file_path, Some(&title))
     }
-    
 
     /// Validate QR code by attempting to decode it
     pub fn validate_qr_code(student_id: &str) -> Result<bool, QRServiceError> {
