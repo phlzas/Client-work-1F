@@ -406,10 +406,6 @@ export function StudentForm({ student, onSubmit, onClose }: StudentFormProps) {
                     <SelectItem value={SELECT_STATES.ERROR} disabled>
                       خطأ في تحميل المجموعات
                     </SelectItem>
-                  ) : groups.length === 0 ? (
-                    <SelectItem value={SELECT_STATES.EMPTY} disabled>
-                      لا توجد مجموعات متاحة
-                    </SelectItem>
                   ) : (
                     groups.map((group) => (
                       <SelectItem key={group.id} value={group.name}>
@@ -426,6 +422,12 @@ export function StudentForm({ student, onSubmit, onClose }: StudentFormProps) {
                   role="alert"
                 >
                   {formState.errors.group}
+                </p>
+              )}
+              {!groupsLoading && !groupsError && groups.length === 0 && (
+                <p className="text-xs text-gray-600">
+                  لا توجد مجموعات بعد. يرجى إنشاء مجموعة من صفحة الإعدادات
+                  أولاً.
                 </p>
               )}
             </div>

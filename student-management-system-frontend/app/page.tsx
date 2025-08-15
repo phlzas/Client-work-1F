@@ -95,7 +95,7 @@ export default function StudentManagementSystem() {
 
       // Initialize default data first
       await Promise.all([
-        ApiService.ensureDefaultGroupsExist().catch(console.error),
+        // Do not auto-create placeholder groups on first run
         ApiService.ensurePaymentSettingsExist().catch(console.error),
       ]);
 

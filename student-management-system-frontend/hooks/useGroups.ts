@@ -47,15 +47,7 @@ export function useGroups() {
         setError(errorMessage);
 
         // Only use fallback on initial load, not on refresh
-        if (groups.length === 0) {
-          console.warn("Using fallback groups due to API failure");
-          setGroups([
-            { id: 1, name: "المجموعة الأولى", created_at: "", updated_at: "" },
-            { id: 2, name: "المجموعة الثانية", created_at: "", updated_at: "" },
-            { id: 3, name: "المجموعة الثالثة", created_at: "", updated_at: "" },
-          ]);
-          setLastFetch(now);
-        }
+        // Do not inject temporary/fallback groups silently
       } finally {
         if (showLoading) setLoading(false);
       }
@@ -197,30 +189,7 @@ export function useGroupsWithCounts() {
     } catch (err) {
       console.error("Failed to load groups with counts:", err);
       setError(err instanceof Error ? err.message : "Failed to load groups");
-      // Fallback to default groups if API fails
-      setGroups([
-        {
-          id: 1,
-          name: "Group A",
-          student_count: 0,
-          created_at: "",
-          updated_at: "",
-        },
-        {
-          id: 2,
-          name: "Group B",
-          student_count: 0,
-          created_at: "",
-          updated_at: "",
-        },
-        {
-          id: 3,
-          name: "Group C",
-          student_count: 0,
-          created_at: "",
-          updated_at: "",
-        },
-      ]);
+      // Do not create temporary placeholder groups
     } finally {
       setLoading(false);
     }

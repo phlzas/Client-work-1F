@@ -378,17 +378,8 @@ impl GroupsService {
 
     /// Ensure default groups exist
     pub fn ensure_default_groups_exist(db: &Database) -> DatabaseResult<()> {
-        let default_groups = vec!["Group A", "Group B", "Group C"];
-
-        for group_name in default_groups {
-            if Self::get_group_by_name(db, group_name)?.is_none() {
-                let request = CreateGroupRequest {
-                    name: group_name.to_string(),
-                };
-                Self::create_group(db, request)?;
-            }
-        }
-
+        // No-op: Do not auto-create temporary groups on first run.
+        // The UI will prompt users to create groups explicitly.
         Ok(())
     }
 

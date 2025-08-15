@@ -670,9 +670,9 @@ impl Database {
     pub fn analyze_query_performance(&self) -> DatabaseResult<Vec<QueryAnalysis>> {
         let test_queries = vec![
             ("Student lookup by ID", "SELECT * FROM students WHERE id = 'test_id'"),
-            ("Students by group", "SELECT * FROM students WHERE group_name = 'Group A'"),
+            ("Students by group", "SELECT * FROM students WHERE group_name = 'Some Group'"),
             ("Students with low payment", "SELECT * FROM students WHERE paid_amount < 6000"),
-            ("Students by group and payment", "SELECT * FROM students WHERE group_name = 'Group A' AND paid_amount < 6000"),
+            ("Students by group and payment", "SELECT * FROM students WHERE group_name = 'Some Group' AND paid_amount < 6000"),
             ("Attendance by student", "SELECT * FROM attendance WHERE student_id = 'test_id'"),
             ("Attendance by date", "SELECT * FROM attendance WHERE date = '2024-01-01'"),
             ("Recent attendance", "SELECT * FROM attendance ORDER BY date DESC LIMIT 10"),
