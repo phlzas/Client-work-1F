@@ -29,7 +29,7 @@ import {
   getPaymentPlanText,
   formatCurrency,
 } from "@/lib/data-transform";
-import { useKeyboardNavigation } from "@/hooks/useKeyboardNavigation";
+// Keyboard navigation disabled per request
 import { useAccessibility } from "@/components/accessibility-provider";
 import { ariaLabels } from "@/lib/accessibility";
 
@@ -73,38 +73,7 @@ export function StudentGrid({
   const tableRef = useRef<HTMLTableElement>(null);
   const { announce } = useAccessibility();
 
-  // Keyboard navigation for table
-  const { containerRef } = useKeyboardNavigation({
-    enableArrowKeys: true,
-    enableEnterKey: true,
-    enableEscapeKey: true,
-    onArrowUp: () => {
-      setSelectedRowIndex((prev) => {
-        const newIndex = Math.max(0, prev - 1);
-        if (newIndex !== prev && filteredStudents[newIndex]) {
-          announce(`الصف ${newIndex + 1}: ${filteredStudents[newIndex].name}`);
-        }
-        return newIndex;
-      });
-    },
-    onArrowDown: () => {
-      setSelectedRowIndex((prev) => {
-        const newIndex = Math.min(filteredStudents.length - 1, prev + 1);
-        if (newIndex !== prev && filteredStudents[newIndex]) {
-          announce(`الصف ${newIndex + 1}: ${filteredStudents[newIndex].name}`);
-        }
-        return newIndex;
-      });
-    },
-    onEnter: () => {
-      if (selectedRowIndex >= 0 && selectedRowIndex < filteredStudents.length) {
-        onEditStudent(filteredStudents[selectedRowIndex]);
-      }
-    },
-    onEscape: () => {
-      setSelectedRowIndex(-1);
-    },
-  });
+  const containerRef = useRef<HTMLDivElement>(null);
 
   // Debounced search to improve performance
   const debouncedSearchTerm = useMemo(() => {
@@ -237,21 +206,9 @@ export function StudentGrid({
               {filteredStudents.map((student, index) => (
                 <TableRow
                   key={student.id}
-                  className={`${getRowClassName(student.paymentStatus!)} ${
-                    selectedRowIndex === index
-                      ? "ring-2 ring-blue-500 bg-blue-50"
-                      : ""
-                  }`}
+                  className={getRowClassName(student.paymentStatus!)}
                   role="row"
-                  tabIndex={0}
-                  aria-selected={selectedRowIndex === index}
-                  onFocus={() => setSelectedRowIndex(index)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      onEditStudent(student);
-                    }
-                  }}
+                  tabIndex={-1}
                 >
                   <TableCell className="font-medium" role="cell">
                     {student.id}

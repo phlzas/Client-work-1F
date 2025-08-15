@@ -1,7 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useEffect, useState } from "react";
-import { useFocusIndicator, useSkipLinks } from "@/hooks/useKeyboardNavigation";
+// Keyboard navigation helpers disabled
 
 interface KeyboardNavigationContextType {
   isKeyboardUser: boolean;
@@ -13,13 +13,12 @@ const KeyboardNavigationContext =
   createContext<KeyboardNavigationContextType | null>(null);
 
 export function useKeyboardNavigationContext() {
-  const context = useContext(KeyboardNavigationContext);
-  if (!context) {
-    throw new Error(
-      "useKeyboardNavigationContext must be used within KeyboardNavigationProvider"
-    );
-  }
-  return context;
+  // Return minimal context to avoid crashes when not wrapped
+  return {
+    isKeyboardUser: false,
+    showFocusIndicators: false,
+    setShowFocusIndicators: () => {},
+  } as KeyboardNavigationContextType;
 }
 
 interface KeyboardNavigationProviderProps {
@@ -29,10 +28,11 @@ interface KeyboardNavigationProviderProps {
 export function KeyboardNavigationProvider({
   children,
 }: KeyboardNavigationProviderProps) {
-  const [isKeyboardUser, setIsKeyboardUser] = useState(false);
-  const [showFocusIndicators, setShowFocusIndicators] = useState(true);
-  const { indicatorRef } = useFocusIndicator();
-  const { skipLinksRef, addSkipLink } = useSkipLinks();
+  const [isKeyboardUser, _setIsKeyboardUser] = useState(false);
+  const [showFocusIndicators, setShowFocusIndicators] = useState(false);
+  const indicatorRef = React.useRef<HTMLDivElement>(null);
+  const skipLinksRef = React.useRef<HTMLDivElement>(null);
+  const addSkipLink = () => {};
 
   // Detect keyboard usage
   useEffect(() => {
@@ -44,7 +44,7 @@ export function KeyboardNavigationProvider({
       if (key === "Tab" || key === "Enter" || key.startsWith("Arrow")) {
         if (!keyboardUsed) {
           keyboardUsed = true;
-          setIsKeyboardUser(true);
+          _setIsKeyboardUser(true);
           document.body.classList.add("keyboard-user");
         }
       }
@@ -53,7 +53,7 @@ export function KeyboardNavigationProvider({
     const handleMouseDown = () => {
       if (keyboardUsed) {
         keyboardUsed = false;
-        setIsKeyboardUser(false);
+        _setIsKeyboardUser(false);
         document.body.classList.remove("keyboard-user");
       }
     };
@@ -69,11 +69,8 @@ export function KeyboardNavigationProvider({
 
   // Add skip links on mount
   useEffect(() => {
-    addSkipLink("main-content", "تخطي إلى المحتوى الرئيسي");
-    addSkipLink("navigation", "تخطي إلى التنقل");
-    addSkipLink("qr-scanner", "تخطي إلى ماسح QR");
-    addSkipLink("student-grid", "تخطي إلى جدول الطلاب");
-  }, [addSkipLink]);
+    // Skip links disabled
+  }, []);
 
   return (
     <KeyboardNavigationContext.Provider
@@ -96,22 +93,7 @@ export function KeyboardNavigationProvider({
       />
 
       {/* Focus Indicator */}
-      {showFocusIndicators && (
-        <div
-          ref={indicatorRef as React.RefObject<HTMLDivElement>}
-          className="focus-indicator"
-          style={{
-            position: "fixed",
-            border: "2px solid #0066cc",
-            borderRadius: "4px",
-            pointerEvents: "none",
-            zIndex: 9999,
-            display: "none",
-            transition: "all 0.1s ease",
-            backgroundColor: "rgba(0, 102, 204, 0.1)",
-          }}
-        />
-      )}
+      {/* Focus indicator disabled */}
 
       {children}
 
@@ -141,41 +123,9 @@ export function KeyboardNavigationProvider({
           top: 6px;
         }
 
-        .keyboard-user *:focus {
-          outline: 2px solid #0066cc !important;
-          outline-offset: 2px !important;
-        }
+        /* Global focus outlines disabled */
 
-        .keyboard-user button:focus,
-        .keyboard-user input:focus,
-        .keyboard-user select:focus,
-        .keyboard-user textarea:focus,
-        .keyboard-user [tabindex]:focus,
-        .keyboard-user [role="button"]:focus {
-          box-shadow: 0 0 0 2px rgba(0, 102, 204, 0.3) !important;
-        }
-
-        /* Enhanced focus styles for better visibility */
-        .keyboard-user .focus-visible {
-          outline: 2px solid #0066cc;
-          outline-offset: 2px;
-          box-shadow: 0 0 0 4px rgba(0, 102, 204, 0.2);
-        }
-
-        /* High contrast mode support */
-        @media (prefers-contrast: high) {
-          .keyboard-user *:focus {
-            outline: 3px solid currentColor !important;
-            outline-offset: 2px !important;
-          }
-        }
-
-        /* Reduced motion support */
-        @media (prefers-reduced-motion: reduce) {
-          .focus-indicator {
-            transition: none !important;
-          }
-        }
+        /* All keyboard-user specific focus styles removed */
       `}</style>
     </KeyboardNavigationContext.Provider>
   );

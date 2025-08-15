@@ -26,11 +26,11 @@ import {
 } from "@/components/ui/sidebar";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import type { Student } from "@/types";
 import { useSidebar } from "@/components/ui/sidebar";
 import { transformStudentsForUI } from "@/lib/data-transform";
-import { useKeyboardNavigation } from "@/hooks/useKeyboardNavigation";
+// Keyboard navigation disabled per request
 
 interface AppSidebarProps {
   activeView: string;
@@ -46,16 +46,7 @@ export function AppSidebar({
   const { state, toggleSidebar } = useSidebar();
 
   // Keyboard navigation for sidebar
-  const { containerRef } = useKeyboardNavigation({
-    enableArrowKeys: true,
-    enableEnterKey: true,
-    onEnter: (event) => {
-      const target = event.target as HTMLElement;
-      if (target.getAttribute("data-view")) {
-        onViewChange(target.getAttribute("data-view")!);
-      }
-    },
-  });
+  const containerRef = useRef<HTMLDivElement>(null);
 
   // Type-safe ref casting for Sidebar component
   const sidebarRef = containerRef as React.RefObject<HTMLDivElement>;

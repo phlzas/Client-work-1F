@@ -158,51 +158,6 @@ export function Settings({ settings, onUpdateSettings }: SettingsProps) {
                 />
               </div>
 
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label htmlFor="accessibilityMode">وضع إمكانية الوصول</Label>
-                  <p className="text-sm text-gray-600">
-                    تحسينات للمستخدمين ذوي الاحتياجات الخاصة
-                  </p>
-                </div>
-                <Switch
-                  id="accessibilityMode"
-                  checked={
-                    localSettings.accessibility_mode ||
-                    localSettings.accessibilityMode ||
-                    false
-                  }
-                  onCheckedChange={(checked) =>
-                    setLocalSettings({
-                      ...localSettings,
-                      accessibility_mode: checked,
-                      accessibilityMode: checked, // Keep both for compatibility
-                    })
-                  }
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="language">اللغة</Label>
-                <Select
-                  value={localSettings.language}
-                  onValueChange={(value: "en" | "ar") =>
-                    setLocalSettings({
-                      ...localSettings,
-                      language: value,
-                    })
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="ar">العربية</SelectItem>
-                    <SelectItem value="en">English</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
               <div className="space-y-2">
                 <Label htmlFor="theme">المظهر</Label>
                 <Select

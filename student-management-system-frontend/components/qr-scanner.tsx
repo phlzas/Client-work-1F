@@ -7,7 +7,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { QrCode, CheckCircle, XCircle } from "lucide-react";
-import { useKeyboardNavigation } from "@/hooks/useKeyboardNavigation";
 import { useAccessibility } from "@/components/accessibility-provider";
 import { ariaLabels } from "@/lib/accessibility";
 
@@ -21,33 +20,10 @@ export function QRScanner({ onScan, result }: QRScannerProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const { announce } = useAccessibility();
 
-  // Keyboard navigation setup
-  const { containerRef } = useKeyboardNavigation({
-    // Keep autofocus only when scanner is visible as the primary tool
-    autoFocus: true,
-    enableEnterKey: true,
-    enableEscapeKey: true,
-    onEnter: (event) => {
-      event.preventDefault();
-      if (input.trim()) {
-        onScan(input.trim());
-        setInput("");
-      }
-    },
-    onEscape: (event) => {
-      event.preventDefault();
-      setInput("");
-      if (inputRef.current) {
-        inputRef.current.focus();
-      }
-    },
-  });
+  // Removed keyboard navigation provider usage to avoid forced focus/blue outline behavior
 
   useEffect(() => {
-    // Focus input when component mounts, but don't hijack focus continuously
-    if (inputRef.current) {
-      inputRef.current.focus();
-    }
+    // Do not auto-focus to avoid stealing focus/blue outline issues
   }, []);
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -75,10 +51,7 @@ export function QRScanner({ onScan, result }: QRScannerProps) {
   };
 
   return (
-    <Card
-      className="w-full"
-      ref={containerRef as React.RefObject<HTMLDivElement>}
-    >
+    <Card className="w-full">
       <CardHeader>
         <CardTitle className="flex items-center gap-2" id="qr-scanner">
           <QrCode className="h-5 w-5" />

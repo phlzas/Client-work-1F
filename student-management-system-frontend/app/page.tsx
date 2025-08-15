@@ -12,10 +12,8 @@ import { AttendanceView } from "@/components/attendance-view";
 import { DashboardStats } from "@/components/dashboard-stats";
 import { AppSidebar } from "@/components/app-sidebar";
 import { QRCodeManager } from "@/components/qr-code-manager";
-import { KeyboardNavigationProvider } from "@/components/keyboard-navigation-provider";
 import { AccessibilityProvider } from "@/components/accessibility-provider";
 import { SkipNavigation } from "@/components/skip-navigation";
-import { HighContrastToggle } from "@/components/high-contrast-toggle";
 import {
   SidebarProvider,
   SidebarInset,
@@ -350,118 +348,112 @@ export default function StudentManagementSystem() {
 
   return (
     <AccessibilityProvider>
-      <KeyboardNavigationProvider>
-        <div className="min-h-screen bg-gray-50" dir="rtl">
-          <SkipNavigation links={skipLinks} />
-          <SidebarProvider defaultOpen={true}>
-            <AppSidebar
-              activeView={activeView}
-              onViewChange={setActiveView}
-              students={students}
-            />
-            <SidebarInset>
-              <div className="flex-1 space-y-4 p-4 md:p-8">
-                <header className="bg-background border-b" role="banner">
-                  <div className="flex h-14 items-center justify-between gap-4 px-4">
-                    <div className="flex items-center gap-4">
-                      <SidebarTrigger
-                        className="h-8 w-8 border border-border hover:bg-accent"
-                        aria-label="تبديل الشريط الجانبي"
-                        aria-expanded="true"
-                        aria-controls="sidebar-navigation"
-                      />
-                      <h1 className="font-semibold text-xl" id="page-title">
-                        نظام إدارة الطلاب
-                      </h1>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <HighContrastToggle />
-                    </div>
+      <div className="min-h-screen bg-gray-50" dir="rtl">
+        <SkipNavigation links={skipLinks} />
+        <SidebarProvider defaultOpen={true}>
+          <AppSidebar
+            activeView={activeView}
+            onViewChange={setActiveView}
+            students={students}
+          />
+          <SidebarInset>
+            <div className="flex-1 space-y-4 p-4 md:p-8">
+              <header className="bg-background border-b" role="banner">
+                <div className="flex h-14 items-center justify-between gap-4 px-4">
+                  <div className="flex items-center gap-4">
+                    <SidebarTrigger
+                      className="h-8 w-8 border border-border hover:bg-accent"
+                      aria-label="تبديل الشريط الجانبي"
+                      aria-expanded="true"
+                      aria-controls="sidebar-navigation"
+                    />
+                    <h1 className="font-semibold text-xl" id="page-title">
+                      نظام إدارة الطلاب
+                    </h1>
                   </div>
-                </header>
+                  <div className="flex items-center gap-2" />
+                </div>
+              </header>
 
-                {/* Error Display */}
-                {error && (
-                  <div className="bg-red-50 border border-red-200 rounded-md p-4 mb-4">
-                    <div className="flex">
-                      <div className="flex-shrink-0">
-                        <svg
-                          className="h-5 w-5 text-red-400"
-                          viewBox="0 0 20 20"
-                          fill="currentColor"
-                        >
-                          <path
-                            fillRule="evenodd"
-                            d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
-                            clipRule="evenodd"
-                          />
-                        </svg>
-                      </div>
-                      <div className="mr-3">
-                        <h3 className="text-sm font-medium text-red-800">
-                          خطأ
-                        </h3>
-                        <div className="mt-2 text-sm text-red-700">
-                          <p>{error}</p>
-                        </div>
-                        <div className="mt-4">
-                          <button
-                            type="button"
-                            className="bg-red-100 px-2 py-1 text-sm font-medium text-red-800 rounded-md hover:bg-red-200"
-                            onClick={() => setError(null)}
-                          >
-                            إغلاق
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                <main
-                  className="space-y-4"
-                  id="main-content"
-                  role="main"
-                  aria-labelledby="page-title"
-                  tabIndex={-1}
-                >
-                  {renderMainContent()}
-                </main>
-              </div>
-            </SidebarInset>
-
-            {/* Student Form Modal */}
-            {isStudentFormOpen && (
-              <StudentForm
-                student={editingStudent}
-                settings={settings}
-                onSubmit={(studentData) => {
-                  if (editingStudent) {
-                    // For updates, we need the full Student object
-                    handleUpdateStudent(studentData as Student);
-                  } else {
-                    // For new students, we have the partial data
-                    handleAddStudent(
-                      studentData as Omit<
-                        Student,
-                        | "id"
-                        | "attendanceLog"
-                        | "paymentHistory"
-                        | "createdAt"
-                        | "updatedAt"
+              {/* Error Display */}
+              {error && (
+                <div className="bg-red-50 border border-red-200 rounded-md p-4 mb-4">
+                  <div className="flex">
+                    <div className="flex-shrink-0">
+                      <svg
+                        className="h-5 w-5 text-red-400"
+                        viewBox="0 0 20 20"
+                        fill="currentColor"
                       >
-                    );
-                  }
-                }}
-                onClose={() => {
-                  setIsStudentFormOpen(false);
-                  setEditingStudent(null);
-                }}
-              />
-            )}
-          </SidebarProvider>
-        </div>
-      </KeyboardNavigationProvider>
+                        <path
+                          fillRule="evenodd"
+                          d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+                          clipRule="evenodd"
+                        />
+                      </svg>
+                    </div>
+                    <div className="mr-3">
+                      <h3 className="text-sm font-medium text-red-800">خطأ</h3>
+                      <div className="mt-2 text-sm text-red-700">
+                        <p>{error}</p>
+                      </div>
+                      <div className="mt-4">
+                        <button
+                          type="button"
+                          className="bg-red-100 px-2 py-1 text-sm font-medium text-red-800 rounded-md hover:bg-red-200"
+                          onClick={() => setError(null)}
+                        >
+                          إغلاق
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <main
+                className="space-y-4"
+                id="main-content"
+                role="main"
+                aria-labelledby="page-title"
+                tabIndex={-1}
+              >
+                {renderMainContent()}
+              </main>
+            </div>
+          </SidebarInset>
+
+          {/* Student Form Modal */}
+          {isStudentFormOpen && (
+            <StudentForm
+              student={editingStudent}
+              settings={settings}
+              onSubmit={(studentData) => {
+                if (editingStudent) {
+                  // For updates, we need the full Student object
+                  handleUpdateStudent(studentData as Student);
+                } else {
+                  // For new students, we have the partial data
+                  handleAddStudent(
+                    studentData as Omit<
+                      Student,
+                      | "id"
+                      | "attendanceLog"
+                      | "paymentHistory"
+                      | "createdAt"
+                      | "updatedAt"
+                    >
+                  );
+                }
+              }}
+              onClose={() => {
+                setIsStudentFormOpen(false);
+                setEditingStudent(null);
+              }}
+            />
+          )}
+        </SidebarProvider>
+      </div>
     </AccessibilityProvider>
   );
 }

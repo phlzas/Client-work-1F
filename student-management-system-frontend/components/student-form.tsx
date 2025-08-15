@@ -23,7 +23,6 @@ import { useGroups } from "@/hooks/useGroups";
 import { usePaymentSettings } from "@/hooks/usePaymentSettings";
 import { validateStudentData } from "@/lib/data-transform";
 import QRCodeDisplay from "@/components/qr-code-display";
-import { useKeyboardNavigation } from "@/hooks/useKeyboardNavigation";
 import { useAccessibility } from "@/components/accessibility-provider";
 import { ariaLabels, FocusManager } from "@/lib/accessibility";
 
@@ -107,16 +106,8 @@ export function StudentForm({ student, onSubmit, onClose }: StudentFormProps) {
   const { settings: paymentSettings } = usePaymentSettings();
   const { announce } = useAccessibility();
 
-  // Keyboard navigation for form
-  const { containerRef } = useKeyboardNavigation({
-    trapFocus: true,
-    restoreFocus: true,
-    enableEscapeKey: true,
-    onEscape: () => {
-      announce("تم إغلاق نموذج الطالب");
-      onClose();
-    },
-  });
+  // Keyboard navigation disabled per request
+  const containerRef = React.useRef<HTMLDivElement>(null);
 
   // Consolidated form state with better typing
   const [formState, setFormState] = useState({
