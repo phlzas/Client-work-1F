@@ -166,10 +166,6 @@ npm run tauri
 │   │   └── qr_service.rs               # QR code generation
 │   ├── Cargo.toml                      # Rust dependencies
 │   └── tauri.conf.json                 # Tauri configuration
-├── .kiro/                              # Kiro AI configuration
-│   ├── specs/                          # Feature specifications
-│   ├── steering/                       # AI guidance documents
-│   └── serpapi_mcp_server.py           # SerpAPI MCP server for web search
 └── public/                             # Static assets
 ```
 
@@ -294,25 +290,6 @@ The application features a sidebar navigation with the following sections:
 - Accessibility enhancements
 - Cross-platform packaging
 
-See `.kiro/specs/student-management-system/tasks.md` for detailed implementation progress.
-
-## Additional Tools
-
-### SerpAPI MCP Server
-
-The project includes a Model Context Protocol (MCP) server that provides web search capabilities through SerpAPI. This allows AI assistants to perform searches across multiple search engines.
-
-**Features:**
-
-- Support for 10+ search engines (Google, Bing, Yahoo, DuckDuckGo, etc.)
-- Configurable search results and location-based queries
-- Structured JSON responses with titles, links, and snippets
-
-**Setup:**
-
-1. Get a SerpAPI key from [serpapi.com](https://serpapi.com/)
-2. Configure the MCP server in `.kiro/settings/mcp.json`
-3. Set your API key in environment variables
 
 See `MCP_SERPAPI_DOCUMENTATION.md` for detailed setup and usage instructions.
 
