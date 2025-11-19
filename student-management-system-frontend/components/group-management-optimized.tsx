@@ -39,7 +39,6 @@ export function GroupManagement({ onStatusChange }: GroupManagementProps) {
     addGroup: addGroupToBackend,
     updateGroup: updateGroupInBackend,
     deleteGroup: deleteGroupFromBackend,
-    forceDeleteGroupWithReassignment,
     getStudentCountByGroupId,
   } = useGroups();
 
@@ -205,55 +204,31 @@ export function GroupManagement({ onStatusChange }: GroupManagementProps) {
     [getStudentCountByGroupId, onStatusChange]
   );
 
-  const confirmDeleteGroup = useCallback(
-    async (forceDelete = false) => {
-      if (!groupToDelete) return;
+  const confirmDeleteGroup = useCallback(async () => {
+    if (!groupToDelete) return;
 
-      try {
-        let success = false;
+    try {
+      const success = await deleteGroupFromBackend(groupToDelete.id);
 
-        if (forceDelete && groupToDelete.studentCount > 0) {
-          // Find a default group to reassign students to
-          const defaultGroup = groups.find(
-            (g) => g.id !== groupToDelete.id && g.name.includes("الأولى")
-          );
-          const defaultGroupName = defaultGroup?.name || "المجموعة الأولى";
-
-          success = await forceDeleteGroupWithReassignment(
-            groupToDelete.id,
-            defaultGroupName
-          );
-        } else {
-          success = await deleteGroupFromBackend(groupToDelete.id);
-        }
-
-        if (success) {
-          // Remove from student counts
-          setGroupStudentCounts((prev) => {
-            const newCounts = { ...prev };
-            delete newCounts[groupToDelete.id];
-            return newCounts;
-          });
-          onStatusChange("تم حذف المجموعة بنجاح");
-        } else {
-          onStatusChange("", "لا يمكن حذف المجموعة لأنها تحتوي على طلاب");
-        }
-      } catch (error) {
-        console.error("Failed to delete group:", error);
+      if (success) {
+        // Remove from student counts
+        setGroupStudentCounts((prev) => {
+          const newCounts = { ...prev };
+          delete newCounts[groupToDelete.id];
+          return newCounts;
+        });
+        onStatusChange("تم حذف المجموعة بنجاح");
+      } else {
         onStatusChange("", "فشل في حذف المجموعة");
-      } finally {
-        setDeleteDialogOpen(false);
-        setGroupToDelete(null);
       }
-    },
-    [
-      groupToDelete,
-      groups,
-      forceDeleteGroupWithReassignment,
-      deleteGroupFromBackend,
-      onStatusChange,
-    ]
-  );
+    } catch (error) {
+      console.error("Failed to delete group:", error);
+      onStatusChange("", "فشل في حذف المجموعة");
+    } finally {
+      setDeleteDialogOpen(false);
+      setGroupToDelete(null);
+    }
+  }, [groupToDelete, deleteGroupFromBackend, onStatusChange]);
 
   // Memoized handlers for keyboard events
   const handleNewGroupKeyDown = useCallback(
@@ -431,7 +406,7 @@ export function GroupManagement({ onStatusChange }: GroupManagementProps) {
                       </div>
                       <p className="text-orange-700 mt-1">
                         هذه المجموعة تحتوي على {groupToDelete.studentCount}{" "}
-                        طالب. سيتم نقل الطلاب إلى "المجموعة الأولى" تلقائياً.
+                        طالب. سيتم حذف المجموعة والطلاب معاً.
                       </p>
                     </div>
                   ) : (
@@ -453,11 +428,7 @@ export function GroupManagement({ onStatusChange }: GroupManagementProps) {
             </Button>
             <Button
               variant="destructive"
-              onClick={() =>
-                confirmDeleteGroup(
-                  groupToDelete ? groupToDelete.studentCount > 0 : false
-                )
-              }
+              onClick={confirmDeleteGroup}
               disabled={groupsMutating}
             >
               {groupsMutating ? (
@@ -466,7 +437,7 @@ export function GroupManagement({ onStatusChange }: GroupManagementProps) {
                 <Trash2 className="h-4 w-4 mr-2" />
               )}
               {groupToDelete && groupToDelete.studentCount > 0
-                ? "حذف مع نقل الطلاب"
+                ? "حذف المجموعة والطلاب"
                 : "حذف المجموعة"}
             </Button>
           </DialogFooter>

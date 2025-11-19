@@ -319,10 +319,6 @@ export function QRCodeManager({ onClose }: QRCodeManagerProps) {
             <QrCode className="h-4 w-4" />
             رمز فردي
           </TabsTrigger>
-          <TabsTrigger value="batch" className="flex items-center gap-2">
-            <Users className="h-4 w-4" />
-            رموز جماعية
-          </TabsTrigger>
           <TabsTrigger value="testing" className="flex items-center gap-2">
             <TestTube className="h-4 w-4" />
             اختبار المسح
@@ -539,14 +535,7 @@ export function QRCodeManager({ onClose }: QRCodeManagerProps) {
                 <li>• استخدم "تصدير PDF" لحفظ الرمز</li>
               </ul>
             </div>
-            <div>
-              <h4 className="font-semibold mb-2">الرموز الجماعية:</h4>
-              <ul className="text-sm space-y-1">
-                <li>• عرض جميع الرموز مجمعة حسب المجموعة</li>
-                <li>• تصدير رموز مجموعة واحدة أو جميع المجموعات</li>
-                <li>• طباعة الرموز في ملف PDF منظم</li>
-              </ul>
-            </div>
+
           </div>
         </CardContent>
       </Card>

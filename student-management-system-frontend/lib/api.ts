@@ -832,31 +832,6 @@ export class ApiService {
     });
   }
 
-  static async forceDeleteGroupWithReassignment(
-    groupId: number,
-    defaultGroupName: string
-  ): Promise<boolean> {
-    if (!groupId || groupId <= 0) {
-      throw new ApiError(
-        "Valid group ID is required",
-        "forceDeleteGroupWithReassignment"
-      );
-    }
-    if (!defaultGroupName?.trim()) {
-      throw new ApiError(
-        "Default group name is required",
-        "forceDeleteGroupWithReassignment"
-      );
-    }
-    return await this.safeInvoke<boolean>(
-      "force_delete_group_with_reassignment",
-      {
-        id: groupId,
-        default_group_name: defaultGroupName.trim(),
-      }
-    );
-  }
-
   // Payment Settings-related methods
   static async getPaymentSettings(): Promise<{
     id: number;

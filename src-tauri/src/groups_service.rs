@@ -38,7 +38,7 @@ impl GroupsService {
     pub fn get_all_groups(db: &Database) -> DatabaseResult<Vec<Group>> {
         let mut stmt = db
             .connection()
-            .prepare("SELECT id, name, created_at, updated_at FROM groups ORDER BY name")?;
+            .prepare("SELECT id, name, created_at, updated_at FROM groups WHERE deleted_at IS NULL ORDER BY name")?;
 
         let group_iter = stmt.query_map([], |row| {
             Ok(Group {
@@ -59,7 +59,8 @@ impl GroupsService {
             "SELECT g.id, g.name, g.created_at, g.updated_at, 
                     COUNT(s.id) as student_count
              FROM groups g
-             LEFT JOIN students s ON g.name = s.group_name
+             LEFT JOIN students s ON g.name = s.group_name AND s.deleted_at IS NULL
+             WHERE g.deleted_at IS NULL
              GROUP BY g.id, g.name, g.created_at, g.updated_at
              ORDER BY g.name",
         )?;
@@ -82,7 +83,7 @@ impl GroupsService {
     pub fn get_group_by_id(db: &Database, id: i32) -> DatabaseResult<Option<Group>> {
         let mut stmt = db
             .connection()
-            .prepare("SELECT id, name, created_at, updated_at FROM groups WHERE id = ?1")?;
+            .prepare("SELECT id, name, created_at, updated_at FROM groups WHERE id = ?1 AND deleted_at IS NULL")?;
 
         let mut group_iter = stmt.query_map([id], |row| {
             Ok(Group {
@@ -103,7 +104,7 @@ impl GroupsService {
     pub fn get_group_by_name(db: &Database, name: &str) -> DatabaseResult<Option<Group>> {
         let mut stmt = db
             .connection()
-            .prepare("SELECT id, name, created_at, updated_at FROM groups WHERE name = ?1")?;
+            .prepare("SELECT id, name, created_at, updated_at FROM groups WHERE name = ?1 AND deleted_at IS NULL")?;
 
         let mut group_iter = stmt.query_map([name], |row| {
             Ok(Group {
@@ -258,43 +259,44 @@ impl GroupsService {
             None => return Ok(false), // Group doesn't exist
         };
 
-        // Check if any students are assigned to this group
-        let student_count = Self::get_students_count_by_group_id(db, id)?;
-        if student_count > 0 {
-            return Err(crate::database::DatabaseError::Migration(format!(
-                "Cannot delete group '{}' because {} students are assigned to it",
-                existing_group.name, student_count
-            )));
+        // Soft delete strategy: mark all students in this group as deleted, then mark the group as deleted
+        let now = Utc::now().to_rfc3339();
+
+        // Soft delete students in this group and clear their group assignment
+        db.connection().execute(
+            "UPDATE students SET deleted_at = ?1, updated_at = ?1, group_name = '' WHERE group_name = ?2 AND deleted_at IS NULL",
+            params![now, existing_group.name],
+        )?;
+
+        // Soft delete the group
+        let rows_affected = db.connection().execute(
+            "UPDATE groups SET deleted_at = ?1, updated_at = ?1 WHERE id = ?2 AND deleted_at IS NULL",
+            params![now, id],
+        )?;
+
+        if rows_affected == 0 {
+            return Ok(false);
         }
 
-        // Delete the group
-        let rows_affected = db
-            .connection()
-            .execute("DELETE FROM groups WHERE id = ?1", params![id])?;
+        // Audit log
+        let old_values = serde_json::json!({
+            "id": existing_group.id,
+            "name": existing_group.name,
+            "created_at": existing_group.created_at,
+            "updated_at": existing_group.updated_at
+        });
 
-        if rows_affected > 0 {
-            // Create audit log entry
-            let old_values = serde_json::json!({
-                "id": existing_group.id,
-                "name": existing_group.name,
-                "created_at": existing_group.created_at,
-                "updated_at": existing_group.updated_at
-            });
+        AuditService::log_action(
+            db,
+            "DELETE",
+            "groups",
+            &id.to_string(),
+            Some(&old_values.to_string()),
+            None,
+            Some(&"Soft delete including group members".to_string()),
+        )?;
 
-            AuditService::log_action(
-                db,
-                "DELETE",
-                "groups",
-                &id.to_string(),
-                Some(&old_values.to_string()),
-                None,
-                None,
-            )?;
-
-            Ok(true)
-        } else {
-            Ok(false)
-        }
+        Ok(true)
     }
 
     /// Get count of students in a group by group ID
@@ -315,9 +317,9 @@ impl GroupsService {
         db: &Database,
         group_name: &str,
     ) -> DatabaseResult<i32> {
-        let mut stmt = db
-            .connection()
-            .prepare("SELECT COUNT(*) FROM students WHERE group_name = ?1")?;
+        let mut stmt = db.connection().prepare(
+            "SELECT COUNT(*) FROM students WHERE group_name = ?1 AND deleted_at IS NULL",
+        )?;
 
         let count: i32 = stmt.query_row([group_name], |row| row.get(0))?;
         Ok(count)

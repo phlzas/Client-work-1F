@@ -122,35 +122,6 @@ export function useGroups() {
     }
   };
 
-  const forceDeleteGroupWithReassignment = async (
-    id: number,
-    defaultGroupName: string
-  ): Promise<boolean> => {
-    setMutating(true);
-    const originalGroups = groups;
-
-    try {
-      // Optimistic update
-      setGroups((prev) => prev.filter((group) => group.id !== id));
-
-      const result = await ApiService.forceDeleteGroupWithReassignment(
-        id,
-        defaultGroupName
-      );
-      if (!result) {
-        // Revert if deletion failed
-        setGroups(originalGroups);
-      }
-      return result;
-    } catch (err) {
-      // Revert on error
-      setGroups(originalGroups);
-      throw err;
-    } finally {
-      setMutating(false);
-    }
-  };
-
   const getStudentCountByGroupId = async (groupId: number): Promise<number> => {
     try {
       return await ApiService.getStudentsCountByGroupId(groupId);
@@ -170,7 +141,6 @@ export function useGroups() {
     addGroup,
     updateGroup,
     deleteGroup,
-    forceDeleteGroupWithReassignment,
     getStudentCountByGroupId,
   };
 }

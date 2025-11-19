@@ -115,7 +115,6 @@ export function Settings({ settings, onUpdateSettings }: SettingsProps) {
     addGroup: addGroupToBackend,
     updateGroup: updateGroupInBackend,
     deleteGroup: deleteGroupFromBackend,
-    forceDeleteGroupWithReassignment,
     getStudentCountByGroupId,
   } = useGroups();
 
@@ -305,26 +304,11 @@ export function Settings({ settings, onUpdateSettings }: SettingsProps) {
     }
   };
 
-  const confirmDeleteGroup = async (forceDelete = false) => {
+  const confirmDeleteGroup = async () => {
     if (!groupToDelete) return;
 
     try {
-      let success = false;
-
-      if (forceDelete && groupToDelete.studentCount > 0) {
-        // Find a default group to reassign students to
-        const defaultGroup = groups.find(
-          (g) => g.id !== groupToDelete.id && g.name.includes("الأولى")
-        );
-        const defaultGroupName = defaultGroup?.name || "المجموعة الأولى";
-
-        success = await forceDeleteGroupWithReassignment(
-          groupToDelete.id,
-          defaultGroupName
-        );
-      } else {
-        success = await deleteGroupFromBackend(groupToDelete.id);
-      }
+      const success = await deleteGroupFromBackend(groupToDelete.id);
 
       if (success) {
         // Remove from student counts
@@ -336,7 +320,7 @@ export function Settings({ settings, onUpdateSettings }: SettingsProps) {
         setSaveStatus("تم حذف المجموعة بنجاح");
         setTimeout(() => setSaveStatus(""), 3000);
       } else {
-        setSaveError("لا يمكن حذف المجموعة لأنها تحتوي على طلاب");
+        setSaveError("فشل في حذف المجموعة");
         setTimeout(() => setSaveError(null), 3000);
       }
     } catch (error) {
@@ -1162,30 +1146,32 @@ export function Settings({ settings, onUpdateSettings }: SettingsProps) {
               <AlertTriangle className="h-5 w-5 text-orange-500" />
               تأكيد حذف المجموعة
             </DialogTitle>
-            <DialogDescription className="text-right">
-              {groupToDelete && (
-                <div className="space-y-2">
-                  <p>هل أنت متأكد من حذف المجموعة "{groupToDelete.name}"؟</p>
-                  {groupToDelete.studentCount > 0 ? (
-                    <div className="p-3 bg-orange-50 border border-orange-200 rounded-lg">
-                      <div className="flex items-center gap-2 text-orange-800">
-                        <AlertTriangle className="h-4 w-4" />
-                        <span className="font-medium">تحذير:</span>
+            <DialogDescription asChild>
+              <div className="text-right space-y-2">
+                {groupToDelete && (
+                  <>
+                    <p>هل أنت متأكد من حذف المجموعة "{groupToDelete.name}"؟</p>
+                    {groupToDelete.studentCount > 0 ? (
+                      <div className="p-3 bg-orange-50 border border-orange-200 rounded-lg">
+                        <div className="flex items-center gap-2 text-orange-800">
+                          <AlertTriangle className="h-4 w-4" />
+                          <span className="font-medium">تحذير:</span>
+                        </div>
+                        <div className="text-orange-700 mt-1">
+                          <p>
+                            هذه المجموعة تحتوي على {groupToDelete.studentCount}{" "}
+                            طالب. سيتم حذف المجموعة والطلاب معاً.
+                          </p>
+                        </div>
                       </div>
-                      <div className="text-orange-700 mt-1">
-                        <p>
-                          هذه المجموعة تحتوي على {groupToDelete.studentCount}{" "}
-                          طالب. سيتم نقل الطلاب إلى "المجموعة الأولى" تلقائياً.
-                        </p>
-                      </div>
-                    </div>
-                  ) : (
-                    <p className="text-gray-600">
-                      هذه المجموعة فارغة ويمكن حذفها بأمان.
-                    </p>
-                  )}
-                </div>
-              )}
+                    ) : (
+                      <p className="text-gray-600">
+                        هذه المجموعة فارغة ويمكن حذفها بأمان.
+                      </p>
+                    )}
+                  </>
+                )}
+              </div>
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="flex gap-2">
@@ -1198,11 +1184,7 @@ export function Settings({ settings, onUpdateSettings }: SettingsProps) {
             </Button>
             <Button
               variant="destructive"
-              onClick={() =>
-                confirmDeleteGroup(
-                  groupToDelete ? groupToDelete.studentCount > 0 : false
-                )
-              }
+              onClick={confirmDeleteGroup}
               disabled={groupsMutating}
             >
               {groupsMutating ? (
@@ -1211,7 +1193,7 @@ export function Settings({ settings, onUpdateSettings }: SettingsProps) {
                 <Trash2 className="h-4 w-4 mr-2" />
               )}
               {groupToDelete && groupToDelete.studentCount > 0
-                ? "حذف مع نقل الطلاب"
+                ? "حذف المجموعة والطلاب"
                 : "حذف المجموعة"}
             </Button>
           </DialogFooter>

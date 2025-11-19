@@ -227,10 +227,7 @@ impl Database {
             Migration {
                 version: 9,
                 description: "Insert default groups".to_string(),
-                sql: "INSERT OR IGNORE INTO groups (name) VALUES 
-                    ('Group A'),
-                    ('Group B'),
-                    ('Group C')".to_string(),
+                sql: "-- removed default groups creation".to_string(),
                 applied_at: None,
             },
             Migration {
@@ -253,6 +250,18 @@ impl Database {
                 description: "Insert default payment settings".to_string(),
                 sql: "INSERT OR IGNORE INTO payment_settings (id, one_time_amount, monthly_amount, installment_amount, installment_interval_months, reminder_days, payment_threshold) VALUES 
                     (1, 6000, 850, 2850, 3, 7, 6000)".to_string(),
+                applied_at: None,
+            },
+            Migration {
+                version: 12,
+                description: "Add deleted_at to students (soft delete)".to_string(),
+                sql: "ALTER TABLE students ADD COLUMN deleted_at DATETIME DEFAULT NULL".to_string(),
+                applied_at: None,
+            },
+            Migration {
+                version: 13,
+                description: "Add deleted_at to groups (soft delete)".to_string(),
+                sql: "ALTER TABLE groups ADD COLUMN deleted_at DATETIME DEFAULT NULL".to_string(),
                 applied_at: None,
             },
         ]

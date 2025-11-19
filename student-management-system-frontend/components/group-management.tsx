@@ -39,7 +39,6 @@ export function GroupManagement({ onStatusChange }: GroupManagementProps) {
     addGroup: addGroupToBackend,
     updateGroup: updateGroupInBackend,
     deleteGroup: deleteGroupFromBackend,
-    forceDeleteGroupWithReassignment,
     getStudentCountByGroupId,
   } = useGroups();
 
@@ -153,26 +152,11 @@ export function GroupManagement({ onStatusChange }: GroupManagementProps) {
     }
   };
 
-  const confirmDeleteGroup = async (forceDelete = false) => {
+  const confirmDeleteGroup = async () => {
     if (!groupToDelete) return;
 
     try {
-      let success = false;
-
-      if (forceDelete && groupToDelete.studentCount > 0) {
-        // Find a default group to reassign students to
-        const defaultGroup = groups.find(
-          (g) => g.id !== groupToDelete.id && g.name.includes("الأولى")
-        );
-        const defaultGroupName = defaultGroup?.name || "المجموعة الأولى";
-
-        success = await forceDeleteGroupWithReassignment(
-          groupToDelete.id,
-          defaultGroupName
-        );
-      } else {
-        success = await deleteGroupFromBackend(groupToDelete.id);
-      }
+      const success = await deleteGroupFromBackend(groupToDelete.id);
 
       if (success) {
         // Remove from student counts
@@ -183,7 +167,7 @@ export function GroupManagement({ onStatusChange }: GroupManagementProps) {
         });
         onStatusChange("تم حذف المجموعة بنجاح");
       } else {
-        onStatusChange("", "لا يمكن حذف المجموعة لأنها تحتوي على طلاب");
+        onStatusChange("", "فشل في حذف المجموعة");
       }
     } catch (error) {
       console.error("Failed to delete group:", error);
@@ -345,7 +329,7 @@ export function GroupManagement({ onStatusChange }: GroupManagementProps) {
                       </div>
                       <p className="text-orange-700 mt-1">
                         هذه المجموعة تحتوي على {groupToDelete.studentCount}{" "}
-                        طالب. سيتم نقل الطلاب إلى "المجموعة الأولى" تلقائياً.
+                        طالب. سيتم حذف المجموعة والطلاب معاً.
                       </p>
                     </div>
                   ) : (
@@ -367,11 +351,7 @@ export function GroupManagement({ onStatusChange }: GroupManagementProps) {
             </Button>
             <Button
               variant="destructive"
-              onClick={() =>
-                confirmDeleteGroup(
-                  groupToDelete ? groupToDelete.studentCount > 0 : false
-                )
-              }
+              onClick={confirmDeleteGroup}
               disabled={groupsMutating}
             >
               {groupsMutating ? (
@@ -380,7 +360,7 @@ export function GroupManagement({ onStatusChange }: GroupManagementProps) {
                 <Trash2 className="h-4 w-4 mr-2" />
               )}
               {groupToDelete && groupToDelete.studentCount > 0
-                ? "حذف مع نقل الطلاب"
+                ? "حذف المجموعة والطلاب"
                 : "حذف المجموعة"}
             </Button>
           </DialogFooter>
